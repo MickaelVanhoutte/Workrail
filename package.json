@@ -39,12 +39,13 @@
         }
       ],
       "category": "public.app-category.productivity",
-      "identity": null,
+      "identity": "-",
       "extendInfo": {
         "NSCameraUsageDescription": "Google Chat calls use your camera.",
         "NSMicrophoneUsageDescription": "Google Chat calls use your microphone.",
         "NSBluetoothAlwaysUsageDescription": "Used for passkey sign-in with your phone."
-      }
+      },
+      "hardenedRuntime": false
     },
     "win": {
       "target": [
