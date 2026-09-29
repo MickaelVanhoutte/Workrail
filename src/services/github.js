@@ -1,0 +1,200 @@
+// Pull requests via the gh CLI (reuses its login; the token never passes
+// through this app): reviews requested from the user, and the user's own
+// open PRs with their review / CI state. One GraphQL call per poll.
+const { app, Notification, shell } = require('electron');
+const { execFile } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+const INTERVAL = 3 * 60 * 1000;
+const GH_CANDIDATES = ['/opt/homebrew/bin/gh', '/usr/local/bin/gh', '/usr/bin/gh'];
+
+// Direct requests only by default; team requests are opt-in (much noisier).
+const reviewQuery = (teams) => `is:open is:pr ${teams ? 'review-requested' : 'user-review-requested'}:@me archived:false`;
+const MINE_QUERY = 'is:open is:pr author:@me archived:false';
+
+const GRAPHQL = `
+query($reviews: String!, $mine: String!) {
+  viewer { login }
+  reviews: search(query: $reviews, type: ISSUE, first: 100) {
+    issueCount
+    nodes { ... on PullRequest {
+      databaseId number title url isDraft createdAt updatedAt
+      repository { nameWithOwner }
+      author { login avatarUrl __typename }
+      timelineItems(itemTypes: REVIEW_REQUESTED_EVENT, last: 20) {
+        nodes { ... on ReviewRequestedEvent {
+          createdAt
+          requestedReviewer { __typename ... on User { login } ... on Team { slug } }
+        } }
+      }
+    } }
+  }
+  mine: search(query: $mine, type: ISSUE, first: 50) {
+    nodes { ... on PullRequest {
+      databaseId number title url isDraft createdAt updatedAt
+      reviewDecision mergeable
+      repository { nameWithOwner }
+      reviewRequests(first: 1) { totalCount }
+      commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+    } }
+  }
+}`;
+
+const seenFile = () => path.join(app.getPath('userData'), 'github-seen.json');
+
+const run = (file, args, opts = {}) => new Promise((resolve, reject) => {
+  execFile(file, args, { timeout: 30000, maxBuffer: 10 * 1024 * 1024, ...opts }, (err, stdout, stderr) => {
+    if (err) {
+      err.stderr = stderr;
+      reject(err);
+    } else resolve(stdout);
+  });
+});
+
+// Packaged apps get a minimal PATH: look in the usual places, then ask a
+// login shell.
+let ghPath;
+async function resolveGh() {
+  if (ghPath !== undefined) return ghPath;
+  ghPath = GH_CANDIDATES.find((p) => fs.existsSync(p)) || null;
+  if (!ghPath) {
+    try {
+      ghPath = (await run('/bin/zsh', ['-lc', 'command -v gh'])).trim() || null;
+    } catch {
+      ghPath = null;
+    }
+  }
+  return ghPath;
+}
+
+// dependabot, renovate, Copilot…: GitHub marks these accounts as bots.
+const isBot = (author) => author?.__typename === 'Bot' || /\[bot\]$/.test(author?.login || '');
+
+function toReview(n, viewer) {
+  // When was *I* asked? Latest request naming me (or one of my teams when
+  // team requests are included); fall back to the PR's creation.
+  const events = n.timelineItems?.nodes || [];
+  const mine = events.filter((e) => e.requestedReviewer?.login === viewer);
+  const requestedAt = (mine.length ? mine : events).at(-1)?.createdAt || n.createdAt;
+  return {
+    id: n.databaseId,
+    number: n.number,
+    title: n.title,
+    url: n.url,
+    repo: n.repository.nameWithOwner,
+    author: n.author?.login || 'ghost',
+    avatar: n.author?.avatarUrl || '',
+    bot: isBot(n.author),
+    draft: n.isDraft,
+    createdAt: n.createdAt,
+    updatedAt: n.updatedAt,
+    requestedAt,
+  };
+}
+
+// One word for what my PR needs, most actionable first.
+function mineStatus(n) {
+  const ci = n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state || null;
+  if (n.isDraft) return 'draft';
+  if (n.mergeable === 'CONFLICTING') return 'conflict';
+  if (ci === 'FAILURE' || ci === 'ERROR') return 'ci-failed';
+  if (n.reviewDecision === 'CHANGES_REQUESTED') return 'changes';
+  if (n.reviewDecision === 'APPROVED') return ci === 'PENDING' || ci === 'EXPECTED' ? 'ci-pending' : 'ready';
+  if (ci === 'PENDING' || ci === 'EXPECTED') return 'ci-pending';
+  return 'waiting';
+}
+
+const toMine = (n) => ({
+  id: n.databaseId,
+  number: n.number,
+  title: n.title,
+  url: n.url,
+  repo: n.repository.nameWithOwner,
+  status: mineStatus(n),
+  pendingReviewers: n.reviewRequests?.totalCount || 0,
+  createdAt: n.createdAt,
+  updatedAt: n.updatedAt,
+});
+
+// "my-org/old-team-*" style patterns (case-insensitive, * = anything).
+const toMatcher = (patterns) => {
+  const res = patterns.map((p) => new RegExp(`^${p.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`, 'i'));
+  return (repo) => res.some((re) => re.test(repo));
+};
+
+function loadSeen() {
+  try {
+    return new Set(JSON.parse(fs.readFileSync(seenFile(), 'utf8')));
+  } catch {
+    return null; // first run
+  }
+}
+
+const keepAlive = new Set();
+function notify(pr) {
+  const n = new Notification({ title: `Review requested · ${pr.repo}#${pr.number}`, body: `${pr.title}\nby ${pr.author}` });
+  keepAlive.add(n);
+  n.on('click', () => shell.openExternal(pr.url));
+  n.on('close', () => keepAlive.delete(n));
+  n.show();
+}
+
+function start({ includeTeams = false, exclude = [], onUpdate }) {
+  const excluded = toMatcher(exclude);
+  let timer = null;
+  let seen = loadSeen();
+
+  const poll = async () => {
+    clearTimeout(timer);
+    const gh = await resolveGh();
+    if (!gh) {
+      onUpdate({ status: 'no-gh', reviews: [], mine: [] });
+      return;
+    }
+    try {
+      const out = await run(gh, ['api', 'graphql',
+        '-f', `query=${GRAPHQL}`,
+        '-f', `reviews=${reviewQuery(includeTeams)}`,
+        '-f', `mine=${MINE_QUERY}`]);
+      const { data } = JSON.parse(out);
+      const viewer = data.viewer.login;
+      const allReviews = data.reviews.nodes.filter((n) => n.repository).map((n) => toReview(n, viewer));
+      const reviews = allReviews.filter((p) => !excluded(p.repo));
+      const hidden = allReviews.length - reviews.length;
+      const mine = data.mine.nodes.filter((n) => n.repository).map(toMine).filter((p) => !excluded(p.repo));
+
+      // Notify genuinely new, recent requests from people. First run or a big
+      // jump (e.g. team requests just turned on) is absorbed silently.
+      if (seen) {
+        const week = Date.now() - 7 * 86400000;
+        const fresh = reviews.filter((p) => !p.bot && !seen.has(p.id) && new Date(p.requestedAt).getTime() > week);
+        if (fresh.length <= 3) fresh.forEach(notify);
+      }
+      seen = new Set([...(seen || []), ...reviews.map((p) => p.id)]);
+      fs.writeFile(seenFile(), JSON.stringify([...seen]), () => {});
+
+      onUpdate({
+        status: 'ok',
+        viewer,
+        reviews,
+        mine,
+        total: data.reviews.issueCount - hidden,
+        hidden,
+        includeTeams,
+        updatedAt: Date.now(),
+      });
+    } catch (err) {
+      const msg = (err.stderr || err.message || '').trim();
+      const auth = /auth|login|401/i.test(msg);
+      console.error('[github]', msg);
+      onUpdate({ status: auth ? 'auth' : 'error', reviews: [], mine: [], error: auth ? null : msg });
+    }
+    timer = setTimeout(poll, INTERVAL);
+  };
+
+  poll();
+  return { refresh: poll, stop: () => clearTimeout(timer) };
+}
+
+module.exports = { start, mineStatus };

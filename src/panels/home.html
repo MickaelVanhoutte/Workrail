@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://avatars.githubusercontent.com; style-src 'self'; script-src 'self'; font-src 'self'">
+  <title>Home</title>
+  <link rel="stylesheet" href="../shell/base.css">
+  <link rel="stylesheet" href="panel.css">
+  <link rel="stylesheet" href="home.css">
+</head>
+<body>
+  <div class="topbar"></div>
+  <main class="content" id="scroller">
+    <div class="page">
+      <header class="hero">
+        <div class="hello">
+          <div class="date" id="date"></div>
+          <h1 id="greeting">Home</h1>
+        </div>
+        <div class="up-next" id="up-next" hidden></div>
+      </header>
+
+      <nav class="stats" id="stats" aria-label="Overview"></nav>
+
+      <div class="layout">
+        <div class="main-col">
+          <section class="card" id="focus">
+            <header><h2>Focus</h2><span class="count"></span></header>
+            <div class="body"></div>
+          </section>
+          <section class="card" id="tickets">
+            <header><h2>My tickets</h2><span class="count"></span><a href="#" class="see-all" data-view="jira">Jira</a></header>
+            <div class="body"></div>
+          </section>
+          <section class="card" id="reviews">
+            <header><h2>Reviews to do</h2><span class="count"></span><a href="#" class="see-all" data-view="github">All reviews</a></header>
+            <div class="body"></div>
+          </section>
+          <section class="card" id="mine">
+            <header><h2>My pull requests</h2><span class="count"></span></header>
+            <div class="body"></div>
+          </section>
+        </div>
+        <aside class="side-col">
+          <section class="card" id="today">
+            <header><h2>Today</h2><span class="count"></span><a href="#" class="see-all" data-view="calendar">Calendar</a></header>
+            <div class="body"></div>
+          </section>
+          <section class="card" id="chat">
+            <header><h2>Chat</h2><span class="count"></span><a href="#" class="see-all" data-view="chat">Open</a></header>
+            <div class="body"></div>
+          </section>
+          <section class="card" id="mail">
+            <header><h2>Important mail</h2><span class="count"></span><a href="#" class="see-all" data-view="gmail">Open</a></header>
+            <div class="body"></div>
+          </section>
+        </aside>
+      </div>
+    </div>
+  </main>
+  <script src="common.js"></script>
+  <script src="home.js"></script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+/* Local panels (Reviews, Settings): black draggable top bar like Chat's,
+ * white Slack-style content. */
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--gs-bg);
+  color: var(--gs-text);
+  font-size: 15px;
+}
+
+.topbar {
+  flex: none;
+  height: 44px;
+  background: var(--gs-top);
+  -webkit-app-region: drag;
+}
+
+.header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 64px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--gs-border);
+}
+.header h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 900;
+}
+.header .meta {
+  color: var(--gs-muted);
+  font-size: 13px;
+}
+.header .spacer { flex: 1; }
+
+.btn {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--gs-input-border);
+  border-radius: 6px;
+  background: var(--gs-bg);
+  color: var(--gs-text);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn:hover { background: var(--gs-hover); }
+.btn.primary { background: var(--gs-green); border-color: var(--gs-green); color: #fff; }
+.btn.primary:hover { background: #148567; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.empty {
+  max-width: 460px;
+  margin: 80px auto;
+  padding: 0 20px;
+  text-align: center;
+  color: var(--gs-muted);
+  line-height: 1.5;
+}
+.empty strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--gs-text);
+  font-size: 18px;
+}
+
+code {
+  padding: 1px 5px;
+  border: 1px solid var(--gs-border);
+  border-radius: 4px;
+  background: var(--gs-hover);
+  color: #e01e5a;
+  font: 12px ui-monospace, Menlo, monospace;
+}

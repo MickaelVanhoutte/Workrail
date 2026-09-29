@@ -1,0 +1,580 @@
+/*
+ * Slack look for Google Chat: black top bar, dark grey sidebar, white
+ * message area (colours sampled from Slack's desktop app).
+ *
+ * Regions are tagged by src/inject/app.js with data-gslack="topbar|sidebar|
+ * divider|main|sidepanel" and flags data-gslack-unread / -selected / -badge /
+ * -column, so this file never depends on Google's obfuscated class names.
+ * Theme rules are scoped to html.gslack (⌘, toggles it). Switcher styles
+ * always apply. Fonts: main.js maps Google's font names to Lato.
+ */
+
+:root {
+  --gs-top: #0e0e0e;
+  --gs-search: #484848;
+  --gs-search-text: #ffffff;
+  --gs-side: #282828;
+  --gs-side-hover: #353535;
+  --gs-side-text: #d4d4d4;
+  --gs-side-muted: #a8a8a8;
+  --gs-side-strong: #ffffff;
+  --gs-selected-bg: #f8f8f8;
+  --gs-selected-text: #1d1c1d;
+  --gs-badge: #f03f76;
+  --gs-bg: #ffffff;
+  --gs-text: #1d1c1d;
+  --gs-muted: #6a6a6a;
+  --gs-border: #e2e2e2;
+  --gs-pill-border: #dadada;
+  --gs-hover: #f8f8f8;
+  --gs-composer-border: #c7c7c7;
+  --gs-link: #1264a3;
+  --gs-accent: #1264a3;
+  --gs-topbar-h: 44px;
+  --gs-font: Lato, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+}
+
+/* Chat set to dark theme: dark message area too. */
+:root:has(> body[data-theme="dark"]) {
+  --gs-bg: #1a1d21;
+  --gs-text: #d1d2d3;
+  --gs-muted: #ababad;
+  --gs-border: #35373b;
+  --gs-pill-border: #35373b;
+  --gs-hover: #222529;
+  --gs-composer-border: #565856;
+  --gs-selected-bg: #1164a3;
+  --gs-selected-text: #ffffff;
+  --gs-link: #1d9bd1;
+}
+
+/* Remap Chat's own Material 3 colour tokens (light theme) to Slack's
+ * palette: recolours every Google component without touching classes. */
+html.gslack body[data-theme="light"],
+html.gslack body[data-theme="light"] [data-theme="light"] {
+  --gm3-sys-color-primary: #1264a3 !important;
+  --gm3-sys-color-on-primary-container: #1d1c1d !important;
+  --gm3-sys-color-primary-container: #e8f5fa !important;
+  --gm3-sys-color-primary-fixed: #e8f5fa !important;
+  --gm3-sys-color-on-primary-fixed: #1d1c1d !important;
+  --gm3-sys-color-secondary-container: #e8f5fa !important;
+  --gm3-sys-color-secondary-fixed: #e8f5fa !important;
+  --gm3-sys-color-surface-container-low: #ffffff !important;
+  --gm3-sys-color-surface-container-low-rgb: 255,255,255 !important;
+  --gm3-sys-color-surface-container: #f8f8f8 !important;
+  --gm3-sys-color-surface-container-rgb: 248,248,248 !important;
+  --gm3-sys-color-surface-container-high: #f1f1f1 !important;
+  --gm3-sys-color-surface-container-highest: #e8e8e8 !important;
+  --body-canvas-background: #ffffff !important;
+  --stream-container-background-color: #ffffff !important;
+  --streammole-container-background-color: #ffffff !important;
+  --standalone-mole-background-color: #ffffff !important;
+  --input-bg-color: #ffffff !important;
+  --highlight-bg-color: #f8f8f8 !important;
+  --primary-container-color: #e8f5fa !important;
+  --primary-app-color: #1264a3 !important;
+  --button-text-color: #1264a3 !important;
+  --button-text-pressed-color: #0b4c8c !important;
+  --button-filled-bg-color: #007a5a !important;
+  --fab-regular-enabled-bg-color: #007a5a !important;
+  --icon-button-color: #1d1c1d !important;
+  --postbar-button-open-icon-color: #1d1c1d !important;
+  --icon-send-enabled: #007a5a !important;
+  --surface-unread-text-color: #1d1c1d !important;
+  --self-mention-bg-color: #fdefc3 !important;
+  --self-mention-new-bg-color: #e8912d !important;
+  --system-message-copy-link-text-color: #1264a3 !important;
+}
+
+html.gslack ::-webkit-scrollbar { width: 8px; height: 8px; }
+html.gslack ::-webkit-scrollbar-thumb { background: rgba(128, 128, 128, 0.35); border-radius: 4px; }
+html.gslack ::-webkit-scrollbar-track { background: transparent; }
+
+/* =========================================================================
+ * Top bar: slim, black, draggable, room for the window buttons
+ * ========================================================================= */
+
+html.gslack [data-gslack="topbar"] {
+  background: var(--gs-top) !important;
+  height: var(--gs-topbar-h) !important;
+  min-height: var(--gs-topbar-h) !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  -webkit-app-region: drag;
+  color: var(--gs-side-strong) !important;
+}
+/* The bar row (tagged by app.js). Items are 48px tall in Chat: centre them. */
+html.gslack [data-gslack="toprow"] {
+  background: var(--gs-top) !important;
+  height: var(--gs-topbar-h) !important;
+  min-height: var(--gs-topbar-h) !important;
+  align-items: center !important;
+  padding-left: 8px !important; /* traffic lights sit over the rail now */
+  box-sizing: border-box;
+}
+/* Left column reserved 302px for the (now hidden) logo */
+html.gslack [data-gslack="toprow"] > div:first-child {
+  min-width: 0 !important;
+  flex: 0 0 auto !important;
+  width: auto !important;
+}
+html.gslack [data-gslack="toprow"] [data-gslack-hide] {
+  display: none !important;
+}
+html.gslack [data-gslack="toprow"] > div {
+  height: var(--gs-topbar-h) !important;
+  align-items: center !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+/* Wrappers of search / status are 48px blocks: centre their content. */
+html.gslack [data-gslack="toprow"] div:has(> form[role="search"]),
+html.gslack [data-gslack="toprow"] div:has(> [aria-label^="Status:"]) {
+  height: var(--gs-topbar-h) !important;
+  display: flex !important;
+  align-items: center !important;
+}
+html.gslack [data-gslack="toprow"] div:has(> form[role="search"]) {
+  flex: 1 1 auto !important;
+  justify-content: center !important;
+}
+html.gslack [data-gslack="topbar"] :is(a, button, input, form, [role="button"], [role="combobox"], [role="menu"], [role="dialog"], iframe) {
+  -webkit-app-region: no-drag;
+}
+html.gslack [data-gslack="topbar"] :is(i, [class*="icon"], svg) {
+  color: var(--gs-side-strong) !important;
+  fill: currentColor;
+}
+
+/* Clutter Slack doesn't have */
+html.gslack [data-gslack="topbar"] a[aria-label="Chat logo"],
+html.gslack [data-gslack="topbar"] [aria-label="Ask Gemini"],
+html.gslack [data-gslack="topbar"] [data-is-touch-wrapper]:has(> [aria-label="Ask Gemini"]),
+html.gslack [data-gslack="topbar"] [data-tooltip="Support"],
+html.gslack [data-gslack="topbar"] [data-ogsr-up] img:not(.gbii):not(a img) {
+  display: none !important;
+}
+
+/* Search: grey rounded field, centred like Slack */
+html.gslack [data-gslack="topbar"] form[role="search"] {
+  background: var(--gs-search) !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  border: 0 !important;
+}
+html.gslack [data-gslack="topbar"] form[role="search"] :is(button, table, td, div) {
+  height: 28px !important;
+  max-height: 28px !important;
+  background: transparent !important;
+  background-image: none !important;
+}
+html.gslack [data-gslack="topbar"] form[role="search"] {
+  width: min(640px, 60vw) !important;
+  max-width: none !important;
+  background-image: none !important;
+}
+/* Input and icon are laid out for a 48px bar: shift them up to centre. */
+html.gslack [data-gslack="topbar"] form[role="search"] table:not(table table) {
+  transform: translateY(-6px);
+}
+html.gslack [data-gslack="topbar"] form[role="search"] button svg {
+  transform: translateY(-9px) scale(0.75);
+}
+html.gslack [data-gslack="topbar"] form[role="search"] input {
+  color: var(--gs-search-text) !important;
+  font-size: 13px !important;
+}
+html.gslack [data-gslack="topbar"] form[role="search"] input::placeholder {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+html.gslack [data-gslack="topbar"] form[role="search"]:focus-within {
+  background: var(--gs-bg) !important;
+}
+html.gslack [data-gslack="topbar"] form[role="search"]:focus-within input {
+  color: var(--gs-text) !important;
+}
+html.gslack [data-gslack="topbar"] form[role="search"]:focus-within :is(i, [class*="icon"], svg) {
+  color: var(--gs-muted) !important;
+}
+
+/* Next meeting pill (app.js renderPill, data from the calendar service) */
+html.gslack .gslack-meeting {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  max-width: 320px;
+  margin: 0 8px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--gs-search);
+  color: #fff;
+  font: 400 13px/1 var(--gs-font);
+  cursor: pointer;
+  white-space: nowrap;
+}
+html.gslack .gslack-meeting:hover { background: #5a5a5a; }
+html.gslack .gslack-meeting-text { overflow: hidden; text-overflow: ellipsis; }
+html.gslack .gslack-meeting strong { font-weight: 700; }
+html.gslack .gslack-meeting-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #a8a8a8;
+}
+html.gslack .gslack-meeting.soon .gslack-meeting-dot { background: #ecb22e; }
+html.gslack .gslack-meeting.ongoing { background: #007a5a; }
+html.gslack .gslack-meeting.ongoing:hover { background: #148567; }
+html.gslack .gslack-meeting.ongoing .gslack-meeting-dot { background: #fff; }
+
+/* Status pill ("Active") → small, quiet */
+html.gslack [data-gslack="topbar"] [aria-label^="Status:"] {
+  background: transparent !important;
+  height: 28px !important;
+  border-radius: 6px !important;
+  color: var(--gs-side-text) !important;
+}
+html.gslack [data-gslack="topbar"] [aria-label^="Status:"] * {
+  color: var(--gs-side-text) !important;
+  font-size: 13px !important;
+}
+html.gslack [data-gslack="topbar"] [aria-label^="Status:"]:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+/* Account chip: avatar only */
+html.gslack [data-gslack="topbar"] [data-ogsr-up] [role="button"] {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+html.gslack [data-gslack="topbar"] img.gbii,
+html.gslack [data-gslack="topbar"] a[aria-label^="Google Account"] img {
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 6px !important;
+}
+
+/* Everything under the top bar fills the rest of the window */
+html.gslack #dynamite-main-content {
+  height: calc(100vh - var(--gs-topbar-h)) !important;
+}
+
+/* =========================================================================
+ * Sidebar
+ * ========================================================================= */
+
+html.gslack [data-gslack="sidebar"],
+html.gslack [data-gslack="divider"] {
+  background: var(--gs-side) !important;
+}
+/* :where() keeps specificity low so hover/selected/unread rules below win. */
+html.gslack [data-gslack="sidebar"] :where(*:not([role="menu"], [role="menu"] *, [role="tooltip"], [role="dialog"], [role="dialog"] *)) {
+  background-color: transparent !important;
+  color: var(--gs-side-text) !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+html.gslack [data-gslack="sidebar"] :where(svg:not([role="menu"] svg)) {
+  fill: currentColor !important;
+}
+
+/* "New chat": compact full-width button */
+html.gslack [data-gslack="sidebar"] button[data-is-fab] {
+  height: 32px !important;
+  min-height: 32px !important;
+  width: calc(100% - 16px) !important;
+  margin: 8px 8px 4px !important;
+  border-radius: 6px !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: none !important;
+  justify-content: flex-start !important;
+}
+html.gslack [data-gslack="sidebar"] button[data-is-fab]:hover {
+  background-color: rgba(255, 255, 255, 0.14) !important;
+}
+html.gslack [data-gslack="sidebar"] button[data-is-fab] * {
+  font-size: 15px !important;
+  color: var(--gs-side-strong) !important;
+}
+
+/* Section headers ("Shortcuts", "Direct messages", custom sections) */
+html.gslack [data-gslack="sidebar"] [data-section-type] > span [role="button"],
+html.gslack [data-gslack="sidebar"] [data-section-type] > span [role="button"] * {
+  font-size: 15px !important;
+  font-weight: 400 !important;
+  color: var(--gs-side-text) !important;
+}
+
+/* Rows */
+html.gslack [data-gslack="sidebar"] :is(span[role="listitem"][data-group-id], [data-shortcut-type], [role="listitem"]) {
+  border-radius: 6px !important;
+}
+html.gslack [data-gslack="sidebar"] :is(span[role="listitem"][data-group-id], [data-shortcut-type]) * {
+  font-size: 15px !important;
+}
+html.gslack [data-gslack="sidebar"] :is(span[role="listitem"][data-group-id], [data-shortcut-type], [role="listitem"]):hover {
+  background-color: var(--gs-side-hover) !important;
+}
+html.gslack [data-gslack="sidebar"] [data-gslack-unread] *:not([role="menu"] *) {
+  color: var(--gs-side-strong) !important;
+  font-weight: 700 !important;
+}
+html.gslack [data-gslack="sidebar"] span[role="listitem"][data-gslack-selected],
+html.gslack [data-gslack="sidebar"] span[role="listitem"][data-gslack-selected]:hover {
+  background-color: var(--gs-selected-bg) !important;
+}
+html.gslack [data-gslack="sidebar"] [data-gslack-selected] *:not([role="menu"] *) {
+  color: var(--gs-selected-text) !important;
+}
+/* Muted conversations (Chat marks them in italics) */
+html.gslack [data-gslack="sidebar"] span[role="listitem"][data-group-id] i:not([class*="icon"]):not([class*="symbol"]) {
+  color: var(--gs-side-muted) !important;
+}
+/* Avatars / space emoji: rounded squares */
+html.gslack [data-gslack="sidebar"] [data-hovercard-id] img {
+  border-radius: 4px !important;
+}
+/* Placeholder avatars → coloured initials (app.js detects the silhouette) */
+html.gslack [data-gslack-initials] {
+  position: relative !important;
+}
+html.gslack [data-gslack-initials] img {
+  opacity: 0 !important;
+}
+html.gslack [data-gslack-initials]::after {
+  content: attr(data-gslack-initials);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--gs-av-color, #1264a3);
+  color: #fff !important;
+  font: 700 var(--gs-av-fs, 13px) / 1 var(--gs-font);
+  border-radius: 6px;
+  pointer-events: none;
+}
+html.gslack [data-gslack="sidebar"] [data-gslack-initials]::after,
+html.gslack [data-user-fullname] [data-gslack-initials]::after {
+  border-radius: 4px;
+}
+
+/* Unread count pills */
+html.gslack [data-gslack="sidebar"] [data-gslack-badge] {
+  background-color: var(--gs-badge) !important;
+  color: #fff !important;
+  border-radius: 9px !important;
+  font-weight: 700 !important;
+  font-size: 12px !important;
+  min-width: 18px;
+  text-align: center;
+}
+
+/* =========================================================================
+ * Main pane
+ * ========================================================================= */
+
+html.gslack [data-gslack="main"],
+html.gslack [data-gslack="main"] > div,
+html.gslack [data-gslack="main"] [role="main"] {
+  background: var(--gs-bg) !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+}
+
+/* Full width instead of Chat's centred column */
+html.gslack [data-gslack="main"] [data-gslack-column] {
+  max-width: none !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+/* Channel header: the current soft view without messages or composer */
+html.gslack [data-gslack="main"] [data-soft-view-current="true"]:not(:has([data-topic-id], [data-is-room-compose-postbar])) {
+  border-bottom: 1px solid var(--gs-border);
+}
+html.gslack [data-gslack="main"] [data-soft-view-current="true"]:not(:has([data-topic-id], [data-is-room-compose-postbar])) span[role="presentation"]:not([data-absolute-timestamp]),
+html.gslack [data-gslack="main"] [data-soft-view-current="true"]:not(:has([data-topic-id], [data-is-room-compose-postbar])) span[role="presentation"]:not([data-absolute-timestamp]) > span {
+  font-weight: 900 !important;
+  font-size: 18px !important;
+  color: var(--gs-text) !important;
+}
+
+/* Messages */
+html.gslack [data-gslack="main"] c-wiz[data-topic-id] {
+  border-radius: 0 !important;
+}
+html.gslack [data-gslack="main"] c-wiz[data-topic-id]:hover {
+  background-color: var(--gs-hover) !important;
+}
+html.gslack [data-gslack="main"] span[role="heading"][aria-level="3"][data-member-id],
+html.gslack [data-gslack="main"] span[role="heading"][aria-level="3"][data-member-id] > span:not([aria-label]) {
+  font-weight: 900 !important;
+  font-size: 15px !important;
+  color: var(--gs-text) !important;
+}
+html.gslack [data-gslack="main"] span[data-absolute-timestamp] {
+  font-size: 12px !important;
+  color: var(--gs-muted) !important;
+}
+html.gslack [data-gslack="main"] [data-is-message="true"] img,
+html.gslack [data-gslack="main"] [data-is-message="true"] {
+  border-radius: 6px !important;
+}
+html.gslack [data-gslack="main"] c-wiz[data-topic-id] a[href]:not([role]) {
+  color: var(--gs-link) !important;
+}
+
+/* DM bubbles → flat Slack rows (flags set by app.js flattenBubbles) */
+html.gslack [data-gslack="main"] [data-gslack-start] {
+  justify-content: flex-start !important;
+  align-items: flex-start !important;
+}
+/* Own bubbles use align-self:flex-end; shows when a wider reactions row
+ * sits below the text. */
+html.gslack [data-gslack="main"] [data-gslack-start] > * {
+  align-self: flex-start !important;
+}
+html.gslack [data-gslack="main"] [data-gslack-bubble] {
+  background: transparent !important;
+  border-radius: 0 !important;
+  padding-top: 1px !important;
+  padding-bottom: 1px !important;
+  box-shadow: none !important;
+}
+html.gslack [data-gslack="main"] [data-gslack-bubble] * {
+  color: var(--gs-text);
+}
+html.gslack [data-gslack="main"] [data-gslack-author]::before {
+  content: attr(data-gslack-author);
+  font-weight: 900;
+  font-size: 15px;
+  color: var(--gs-text);
+  margin-right: 8px;
+}
+html.gslack [data-gslack="main"] [data-gslack-grouphead] {
+  position: relative;
+}
+html.gslack [data-gslack="main"] [data-gslack-grouphead]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: var(--gs-self-avatar, var(--gs-border)) center / cover;
+}
+html.gslack [data-gslack="main"] [data-gslack-author] {
+  display: flex !important;
+  align-items: baseline !important;
+}
+
+/* Day dividers: pill on a horizontal rule */
+html.gslack [data-gslack="main"] [role="heading"][aria-level="2"] {
+  background: linear-gradient(var(--gs-border), var(--gs-border)) no-repeat center / 100% 1px !important;
+}
+html.gslack [data-gslack="main"] [role="heading"][aria-level="2"] > div > div {
+  display: inline-block;
+  background: var(--gs-bg) !important;
+  border: 1px solid var(--gs-pill-border) !important;
+  border-radius: 24px !important;
+  padding: 3px 16px !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  color: var(--gs-text) !important;
+}
+
+/* Composer: one bordered box around input and tools (tagged by app.js) */
+html.gslack [data-gslack="main"] [data-gslack-composer] {
+  background: var(--gs-bg) !important;
+  border: 1px solid var(--gs-composer-border) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+html.gslack [data-gslack="main"] [data-gslack-composer]:focus-within {
+  border-color: #868686 !important;
+}
+/* Chat tints the box with a ::before state layer */
+html.gslack [data-gslack="main"] [data-gslack-composer]::before {
+  display: none !important;
+}
+html.gslack [data-gslack="main"] [data-gslack-composer] :where(div[data-ts], div[data-ts] *) {
+  background-color: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+html.gslack [data-gslack="main"] [role="textbox"][contenteditable] {
+  font-size: 15px !important;
+  color: var(--gs-text) !important;
+}
+
+/* Right side panel (Calendar/Keep/Tasks rail): hidden, Slack has none */
+html.gslack [data-gslack="sidepanel"] {
+  display: none !important;
+}
+
+/* =========================================================================
+ * Quick switcher (⌘K)
+ * ========================================================================= */
+
+.gslack-sw {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+  font-family: var(--gs-font);
+}
+.gslack-sw-panel {
+  width: min(560px, calc(100vw - 32px));
+  background: var(--gs-bg);
+  color: var(--gs-text);
+  border-radius: 10px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.gslack-sw-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  border-bottom: 1px solid var(--gs-border);
+  padding: 16px 18px;
+  font: 18px var(--gs-font);
+  background: transparent;
+  color: inherit;
+  outline: none;
+}
+.gslack-sw-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 6px;
+}
+.gslack-sw-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 15px;
+}
+.gslack-sw-row.unread .gslack-sw-name { font-weight: 700; }
+.gslack-sw-row.active { background: var(--gs-accent); color: #fff; }
+.gslack-sw-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gslack-sw-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gs-badge); }
+.gslack-sw-empty { padding: 12px; color: var(--gs-muted); font-size: 14px; }
+.gslack-sw-hint {
+  padding: 8px 18px;
+  border-top: 1px solid var(--gs-border);
+  color: var(--gs-muted);
+  font-size: 12px;
+}

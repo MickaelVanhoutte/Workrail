@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.dump.txt
+.DS_Store
+*.log
+.claude/
+.vscode/
+.idea/

@@ -1,0 +1,42 @@
+{
+  "name": "workrail",
+  "productName": "Workrail",
+  "version": "0.1.0",
+  "description": "Slack-style desktop hub for Google Chat, Gmail, Calendar, GitHub reviews and Jira",
+  "main": "src/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "dump": "node scripts/dump-dom.mjs",
+    "dist": "electron-builder --mac --arm64"
+  },
+  "build": {
+    "appId": "app.workrail.desktop",
+    "productName": "Workrail",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "dir",
+        "dmg"
+      ],
+      "category": "public.app-category.productivity",
+      "identity": null,
+      "extendInfo": {
+        "NSCameraUsageDescription": "Google Chat calls use your camera.",
+        "NSMicrophoneUsageDescription": "Google Chat calls use your microphone.",
+        "NSBluetoothAlwaysUsageDescription": "Used for passkey sign-in with your phone."
+      }
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "node-ical": "^0.27.2"
+  }
+}

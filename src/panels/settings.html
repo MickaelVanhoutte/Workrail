@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'">
+  <title>Settings</title>
+  <link rel="stylesheet" href="../shell/base.css">
+  <link rel="stylesheet" href="panel.css">
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <div class="topbar"></div>
+  <header class="header"><h1>Settings</h1></header>
+  <main class="content">
+    <section class="card">
+      <h2>Calendar</h2>
+      <p class="help">
+        Paste your calendar's <b>secret address in iCal format</b>: Google Calendar → ⚙ Settings →
+        your calendar under “Settings for my calendars” → <b>Integrate calendar</b>.
+        It is stored encrypted in your macOS Keychain and only used to read your meetings.
+      </p>
+      <form id="ical-form" class="row">
+        <input id="ical" type="password" autocomplete="off" spellcheck="false"
+               placeholder="https://calendar.google.com/calendar/ical/…/private-…/basic.ics">
+        <button class="btn primary" type="submit">Save</button>
+        <button class="btn" type="button" id="ical-remove">Remove</button>
+      </form>
+      <p class="status" id="ical-status"></p>
+
+      <label class="field">
+        <span>Meeting reminder</span>
+        <select id="reminder">
+          <option value="0">When it starts</option>
+          <option value="1">1 minute before</option>
+          <option value="2">2 minutes before</option>
+          <option value="5">5 minutes before</option>
+        </select>
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>Home</h2>
+      <label class="field">
+        <span>Morning summary</span>
+        <select id="summary-time">
+          <option value="off">Off</option>
+          <option value="08:30">8:30</option>
+          <option value="08:55">8:55</option>
+          <option value="09:00">9:00</option>
+          <option value="09:30">9:30</option>
+          <option value="10:00">10:00</option>
+        </select>
+      </label>
+      <p class="help tight">Weekdays: a notification with your day (meetings, reviews, DMs, PRs to merge).</p>
+      <label class="field">
+        <span>End of workday</span>
+        <select id="workday-end">
+          <option value="17:00">17:00</option>
+          <option value="17:30">17:30</option>
+          <option value="18:00">18:00</option>
+          <option value="18:30">18:30</option>
+          <option value="19:00">19:00</option>
+        </select>
+      </label>
+      <p class="help tight">Free slots on Home are counted until this time.</p>
+    </section>
+
+    <section class="card">
+      <h2>GitHub</h2>
+      <label class="check">
+        <input type="checkbox" id="github">
+        <span>Show pull requests waiting for my review (uses the <code>gh</code> CLI login)</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="github-teams">
+        <span>Include requests sent to my teams (many more)</span>
+      </label>
+      <label class="field-col">
+        <span>Hidden repositories</span>
+        <textarea id="github-exclude" rows="3" spellcheck="false" placeholder="my-org/old-team-*"></textarea>
+        <small>One per line, <code>*</code> matches anything. Also available as “Hide repo” on each pull request.</small>
+      </label>
+      <p class="status" id="github-status"></p>
+    </section>
+    <section class="card">
+      <h2>Jira</h2>
+      <label class="check">
+        <input type="checkbox" id="jira">
+        <span>Show my Jira tickets (uses your Jira session in the app: sign in once in the Jira view)</span>
+      </label>
+      <label class="field">
+        <span>Site</span>
+        <input type="text" id="jira-site" spellcheck="false" placeholder="yourcompany.atlassian.net">
+      </label>
+      <label class="field-col">
+        <span>Filter (JQL, optional)</span>
+        <textarea id="jira-jql" rows="2" spellcheck="false"></textarea>
+        <small>Leave empty for your open tickets: <code>assignee = currentUser() AND statusCategory != Done</code>.</small>
+      </label>
+      <p class="status" id="jira-status"></p>
+    </section>
+  </main>
+  <script src="settings.js"></script>
+</body>
+</html>
