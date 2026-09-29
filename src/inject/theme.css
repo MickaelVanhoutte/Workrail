@@ -86,6 +86,24 @@ html.gslack body[data-theme="light"] [data-theme="light"] {
   --system-message-copy-link-text-color: #1264a3 !important;
 }
 
+/* Sidebar popovers ("Show all" for a section…) are drawn with the same
+ * surface tokens: keep them dark there. Selector outranks the light remap
+ * above (both !important, higher specificity wins). */
+html.gslack body[data-theme] [data-gslack="sidebar"],
+html.gslack body[data-theme] [data-gslack="sidebar"] [data-theme] {
+  --gm3-sys-color-surface: #282828 !important;
+  --gm3-sys-color-surface-bright: #333333 !important;
+  --gm3-sys-color-surface-container-lowest: #282828 !important;
+  --gm3-sys-color-surface-container-low: #282828 !important;
+  --gm3-sys-color-surface-container-low-rgb: 40,40,40 !important;
+  --gm3-sys-color-surface-container: #2f2f2f !important;
+  --gm3-sys-color-surface-container-rgb: 47,47,47 !important;
+  --gm3-sys-color-surface-container-high: #333333 !important;
+  --gm3-sys-color-surface-container-highest: #3a3a3a !important;
+  --gm3-sys-color-on-surface: #d4d4d4 !important;
+  --gm3-sys-color-on-surface-variant: #a8a8a8 !important;
+}
+
 html.gslack ::-webkit-scrollbar { width: 8px; height: 8px; }
 html.gslack ::-webkit-scrollbar-thumb { background: rgba(128, 128, 128, 0.35); border-radius: 4px; }
 html.gslack ::-webkit-scrollbar-track { background: transparent; }
@@ -110,6 +128,8 @@ html.gslack [data-gslack="toprow"] {
   min-height: var(--gs-topbar-h) !important;
   align-items: center !important;
   padding-left: 8px !important; /* traffic lights sit over the rail now */
+  /* Windows/Linux: window controls overlay the right end (set by views.js) */
+  padding-right: var(--gs-controls-w, 0px) !important;
   box-sizing: border-box;
 }
 /* Left column reserved 302px for the (now hidden) logo */

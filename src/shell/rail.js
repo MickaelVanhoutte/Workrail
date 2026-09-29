@@ -2,6 +2,12 @@
 const api = window.gslackShell;
 const items = [...document.querySelectorAll('.rail-item')];
 
+// Off macOS: Ctrl shortcuts, no traffic lights (see rail.css).
+if (api.platform !== 'darwin') {
+  document.body.classList.add('no-mac');
+  for (const item of items) item.title = item.title.replace('⌘', 'Ctrl+');
+}
+
 const fmtCount = (n) => (n > 99 ? '99+' : String(n));
 
 function render(state) {

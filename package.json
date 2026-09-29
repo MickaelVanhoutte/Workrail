@@ -8,20 +8,34 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
+    "smoke": "electron . --smoke",
+    "icons": "electron scripts/make-icons.cjs",
     "dump": "node scripts/dump-dom.mjs",
-    "dist": "electron-builder --mac --arm64"
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac --arm64",
+    "dist:win": "electron-builder --win --x64",
+    "dist:linux": "electron-builder --linux --x64"
   },
   "build": {
     "appId": "app.workrail.desktop",
     "productName": "Workrail",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
     "files": [
       "src/**/*",
       "package.json"
     ],
     "mac": {
       "target": [
-        "dir",
-        "dmg"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
       ],
       "category": "public.app-category.productivity",
       "identity": null,
@@ -30,7 +44,51 @@
         "NSMicrophoneUsageDescription": "Google Chat calls use your microphone.",
         "NSBluetoothAlwaysUsageDescription": "Used for passkey sign-in with your phone."
       }
-    }
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Office",
+      "executableName": "workrail",
+      "synopsis": "Workday hub for Google Chat, Gmail, Calendar, GitHub and Jira",
+      "maintainer": "Mickael Vanhoutte <51904030+MickaelVanhoutte@users.noreply.github.com>"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "MickaelVanhoutte",
+        "repo": "Workrail",
+        "releaseType": "draft"
+      }
+    ]
   },
   "devDependencies": {
     "electron": "^44.4.5",
@@ -38,5 +96,15 @@
   },
   "dependencies": {
     "node-ical": "^0.27.2"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Mickael Vanhoutte",
+    "email": "51904030+MickaelVanhoutte@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/MickaelVanhoutte/Workrail",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MickaelVanhoutte/Workrail.git"
   }
 }

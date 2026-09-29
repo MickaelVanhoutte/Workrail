@@ -4,6 +4,7 @@ const { WebContentsView, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const settings = require('./settings');
+const platform = require('./platform');
 
 const RAIL_W = 80; // keep in sync with .rail width in shell/rail.css
 const PARTITION = 'persist:gchat';
@@ -108,15 +109,24 @@ function createViews(win, { userAgent, dev, onShow, onReady }) {
       keys.theme = await wc.insertCSS(readInject('theme.css'));
       css.set(wc.id, keys);
       await applyFonts(wc);
+      // Room for the window controls in Chat's top bar (0 on macOS).
+      await wc.executeJavaScript(`document.documentElement.style.setProperty('--gs-controls-w', '${platform.CONTROLS_W}px')`);
       await wc.executeJavaScript(readInject('app.js'));
     } catch (err) {
       console.error(`[inject:${name}]`, err);
     }
   }
 
+  // Off macOS the window controls overlay the top-right corner. Chat and the
+  // local panels have their own dark top bar there; the other web apps are
+  // pushed below a dark strip drawn by the rail page.
+  const UNSTYLED = new Set(['gmail', 'calendar', 'jira']);
   function layout() {
     const [width, height] = win.getContentSize();
-    for (const v of views.values()) v.setBounds({ x: RAIL_W, y: 0, width: Math.max(0, width - RAIL_W), height });
+    for (const [name, v] of views) {
+      const top = !platform.IS_MAC && UNSTYLED.has(name) ? platform.TOPBAR_H : 0;
+      v.setBounds({ x: RAIL_W, y: top, width: Math.max(0, width - RAIL_W), height: Math.max(0, height - top) });
+    }
   }
 
   function open(name, url) {

@@ -7,7 +7,15 @@ const fs = require('fs');
 const path = require('path');
 
 const INTERVAL = 3 * 60 * 1000;
-const GH_CANDIDATES = ['/opt/homebrew/bin/gh', '/usr/local/bin/gh', '/usr/bin/gh'];
+// Usual install locations (packaged apps may not inherit the shell's PATH).
+const GH_CANDIDATES = {
+  darwin: ['/opt/homebrew/bin/gh', '/usr/local/bin/gh'],
+  linux: ['/usr/bin/gh', '/usr/local/bin/gh', '/snap/bin/gh', '/home/linuxbrew/.linuxbrew/bin/gh'],
+  win32: [
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'GitHub CLI', 'gh.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'GitHub CLI', 'gh.exe'),
+  ],
+}[process.platform] || [];
 
 // Direct requests only by default; team requests are opt-in (much noisier).
 const reviewQuery = (teams) => `is:open is:pr ${teams ? 'review-requested' : 'user-review-requested'}:@me archived:false`;
@@ -52,15 +60,18 @@ const run = (file, args, opts = {}) => new Promise((resolve, reject) => {
   });
 });
 
-// Packaged apps get a minimal PATH: look in the usual places, then ask a
-// login shell.
+// Packaged apps get a minimal PATH on macOS/Linux: look in the usual
+// places, then ask the user's login shell (or `where` on Windows).
 let ghPath;
 async function resolveGh() {
   if (ghPath !== undefined) return ghPath;
-  ghPath = GH_CANDIDATES.find((p) => fs.existsSync(p)) || null;
+  ghPath = GH_CANDIDATES.find((p) => p && fs.existsSync(p)) || null;
   if (!ghPath) {
     try {
-      ghPath = (await run('/bin/zsh', ['-lc', 'command -v gh'])).trim() || null;
+      const out = process.platform === 'win32'
+        ? await run('where', ['gh'])
+        : await run(process.env.SHELL || '/bin/sh', ['-lc', 'command -v gh']);
+      ghPath = out.split(/\r?\n/)[0].trim() || null;
     } catch {
       ghPath = null;
     }

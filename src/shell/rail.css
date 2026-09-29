@@ -94,3 +94,18 @@ body {
 /* Calendar: time to next meeting, green when it is running */
 .rail-badge.time { background: var(--gs-rail-active); }
 .rail-badge.time.now { background: var(--gs-green); }
+
+/* Windows/Linux (body.no-mac, set by rail.js): no traffic lights; the window
+ * controls overlay the top-right, above a dark strip (TOPBAR_H in platform.js). */
+.topstrip { display: none; }
+body.no-mac .topstrip {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 80px;
+  right: 0;
+  height: 44px;
+  background: var(--gs-top);
+  -webkit-app-region: drag;
+}
+body.no-mac .rail-drag { height: 44px; }

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Notification, session, shell, ipcMain, nativeTheme } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, session, shell, ipcMain, nativeTheme } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const settings = require('./settings');
@@ -8,21 +8,26 @@ const github = require('./services/github');
 const calendar = require('./services/calendar');
 const jira = require('./services/jira');
 const priorities = require('./priorities');
+const platform = require('./platform');
 
 const DEV = process.argv.includes('--dev');
+// CI check: open the window, load the local pages, exit (see README).
+const SMOKE = process.argv.includes('--smoke');
+// Isolated profile: never touches (or is blocked by) a running Workrail.
+if (SMOKE) app.setPath('userData', fs.mkdtempSync(path.join(require('os').tmpdir(), 'workrail-smoke-')));
 const STATE_FILE = () => path.join(app.getPath('userData'), 'window-state.json');
 
 if (DEV) app.commandLine.appendSwitch('remote-debugging-port', '9222');
 
-// Google refuses sign-in from "embedded browsers". Present as plain Chrome
-// matching the bundled Chromium version.
-const CHROME_UA =
-  `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ` +
-  `(KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`;
+// Google refuses sign-in from "embedded browsers": present as plain Chrome.
+const CHROME_UA = platform.chromeUserAgent();
 app.userAgentFallback = CHROME_UA;
+// Windows only shows toasts for apps with an explicit model id.
+if (platform.IS_WIN) app.setAppUserModelId('app.workrail.desktop');
 
 let win = null;
 let views = null;
+let tray = null;
 let quitting = false;
 let githubService = null;
 let calendarService = null;
@@ -90,9 +95,24 @@ function calendarBadge(next) {
   return mins <= 15 ? `${Math.max(mins, 0)}m` : '';
 }
 
-// Chat's own count drives the dock badge, like Slack's mentions.
+// Chat's own count drives the dock / taskbar badge, like Slack's mentions.
 function setDockBadge(n) {
-  app.dock?.setBadge(n > 0 ? String(n) : '');
+  platform.setBadge(win, n);
+  tray?.setToolTip(n > 0 ? `Workrail · ${n} unread` : 'Workrail');
+}
+
+// Windows/Linux: closing the window hides it, so the tray brings it back.
+function createTray() {
+  if (platform.IS_MAC || tray) return;
+  tray = new Tray(platform.asset('tray.png'));
+  tray.setToolTip('Workrail');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Show Workrail', click: () => showWindow() },
+    { label: 'Home', click: () => { showWindow(); views?.show('home'); } },
+    { type: 'separator' },
+    { label: 'Quit', click: () => { quitting = true; app.quit(); } },
+  ]));
+  tray.on('click', () => showWindow());
 }
 
 // --- services ---------------------------------------------------------------
@@ -201,9 +221,9 @@ function createWindow() {
     minWidth: 760,
     minHeight: 480,
     title: 'Workrail',
-    // Slack style: traffic lights sit over the top of the rail.
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 13, y: 16 },
+    // macOS: traffic lights over the rail. Windows/Linux: dark overlay with
+    // the controls top-right (platform.js).
+    ...platform.windowChrome(),
     backgroundColor: '#0e0e0e',
     show: false,
     webPreferences: {
@@ -219,7 +239,7 @@ function createWindow() {
   win.on('resize', saveWindowState);
   win.on('move', saveWindowState);
 
-  // Slack behaviour: closing hides, ⌘Q quits.
+  // Slack behaviour: closing hides, ⌘Q / Ctrl+Q (or the tray) quits.
   win.on('close', (e) => {
     if (!quitting) {
       e.preventDefault();
@@ -246,10 +266,35 @@ function createWindow() {
       if (name === 'jira' && state.jira.status === 'auth') jiraService?.refresh();
     },
   });
+  if (SMOKE) return runSmokeTest();
   // Chat always loads (dock badge, unread conversations for Home); the day
   // starts on Home.
   views.show('chat');
   views.show('home');
+}
+
+// --smoke: the rail and Home (local pages) must load; no network needed.
+function runSmokeTest() {
+  const fail = (why) => {
+    console.error('[smoke] FAIL:', why);
+    app.exit(1);
+  };
+  process.on('uncaughtException', (err) => fail(err.stack || err));
+  setTimeout(() => fail('timeout'), 30000);
+  const loaded = (wc) => new Promise((resolve, reject) => {
+    wc.once('did-finish-load', resolve);
+    wc.once('did-fail-load', (_e, code, desc) => reject(new Error(`${code} ${desc}`)));
+  });
+  const rail = loaded(win.webContents);
+  views.show('home');
+  Promise.all([rail, loaded(views.webContents('home'))])
+    .then(() => views.webContents('home').executeJavaScript('document.getElementById("focus") ? "ok" : "missing"'))
+    .then((res) => {
+      if (res !== 'ok') return fail('Home did not render');
+      console.log(`[smoke] OK on ${process.platform}`);
+      app.exit(0);
+    })
+    .catch((err) => fail(err.message));
 }
 
 // --- morning summary ----------------------------------------------------------
@@ -304,7 +349,7 @@ ipcMain.on('gslack:unread', (e, n) => {
   pushState();
 });
 ipcMain.on('gslack:notification', () => {
-  if (win && !win.isFocused()) app.dock?.bounce('informational');
+  if (win && !win.isFocused()) platform.requestAttention(win);
 });
 ipcMain.on('gslack:notification-click', (e) => {
   showWindow();
@@ -375,7 +420,11 @@ ipcMain.handle('settings:save', (e, patch) => {
     if (url && !/^https:\/\/calendar\.google\.com\/calendar\/ical\//.test(url)) {
       return { error: 'This does not look like a Google Calendar iCal address (https://calendar.google.com/calendar/ical/…).' };
     }
-    settings.setIcalUrl(url || null);
+    try {
+      settings.setIcalUrl(url || null);
+    } catch (err) {
+      return { error: err.message };
+    }
     calendarService?.refresh();
   }
   const rest = {};
@@ -410,8 +459,10 @@ function buildMenu() {
     showWindow();
     views?.show(name);
   };
-  const template = [
-    {
+  // macOS app menu; elsewhere a plain File menu (the menu bar itself is
+  // hidden by the title-bar overlay, the shortcuts still work).
+  const appMenu = platform.IS_MAC
+    ? {
       label: app.name,
       submenu: [
         { role: 'about' },
@@ -426,7 +477,17 @@ function buildMenu() {
         { type: 'separator' },
         { role: 'quit' },
       ],
-    },
+    }
+    : {
+      label: 'File',
+      submenu: [
+        { label: 'Settings…', accelerator: 'Ctrl+,', click: go('settings') },
+        { type: 'separator' },
+        { label: 'Quit', accelerator: 'Ctrl+Q', click: () => { quitting = true; app.quit(); } },
+      ],
+    };
+  const template = [
+    appMenu,
     { role: 'editMenu' },
     {
       label: 'View',
@@ -482,6 +543,8 @@ if (!app.requestSingleInstanceLock()) {
     const ses = setupGoogleSession();
     buildMenu();
     createWindow();
+    if (SMOKE) return;
+    createTray();
     startServices(ses);
     setInterval(checkMorningSummary, 60000);
     // Keep relative times on Home fresh even when no service reports.

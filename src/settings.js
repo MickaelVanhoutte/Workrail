@@ -1,5 +1,6 @@
 // User settings in userData/settings.json. The iCal secret address is
-// encrypted with safeStorage (macOS Keychain) and never logged.
+// encrypted with safeStorage (OS keychain: macOS Keychain, Windows DPAPI,
+// GNOME Keyring / KWallet on Linux) and never logged.
 const { app, safeStorage } = require('electron');
 const { EventEmitter } = require('events');
 const fs = require('fs');
@@ -63,7 +64,14 @@ function getIcalUrl() {
 
 function setIcalUrl(url) {
   if (!url) return set({ icalEnc: null });
-  if (!safeStorage.isEncryptionAvailable()) throw new Error('Keychain encryption unavailable');
+  // Linux without a keyring falls back to a hard-coded key ("basic_text"):
+  // refuse rather than store the secret practically in clear.
+  const weak = process.platform === 'linux' && safeStorage.getSelectedStorageBackend?.() === 'basic_text';
+  if (!safeStorage.isEncryptionAvailable() || weak) {
+    throw new Error(process.platform === 'linux'
+      ? 'No keyring available: install or unlock GNOME Keyring or KWallet, then restart Workrail.'
+      : 'Secure storage is unavailable on this system.');
+  }
   set({ icalEnc: safeStorage.encryptString(url).toString('base64') });
 }
 

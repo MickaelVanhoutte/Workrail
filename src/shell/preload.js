@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 // Bridge for local pages: the rail (shell/rail.html) and panels
 // (panels/home.html, panels/github.html, panels/settings.html).
 contextBridge.exposeInMainWorld('gslackShell', {
+  // 'darwin' | 'win32' | 'linux': layout (window controls) and shortcut labels.
+  platform: process.platform,
   getState: () => ipcRenderer.invoke('shell:get-state'),
   onState: (cb) => {
     const listener = (_e, state) => cb(state);
