@@ -17,6 +17,15 @@ const DEFAULTS = {
   jira: true,
   jiraSite: '', // e.g. yourcompany.atlassian.net; empty = Jira not set up
   jiraJql: '', // empty = default: my open tickets
+  // Workflow: standup before the daily meeting, AI agent hand-off.
+  standupLanguage: 'auto', // auto (system language) | fr | en
+  standupMatch: 'daily|stand-?up|scrum|mêlée', // meeting titles (regex, case-insensitive)
+  standupLead: 5, // minutes before; 0 = off
+  lastStandupDate: null,
+  codeFolders: [], // empty = common folders for this OS
+  terminal: 'auto',
+  agent: 'auto',
+  agentCommand: '', // custom agent: e.g. "mytool --ask {prompt}"
   icalEnc: null,
 };
 

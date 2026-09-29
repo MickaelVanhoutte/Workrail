@@ -18,4 +18,21 @@ contextBridge.exposeInMainWorld('gslackShell', {
   refresh: (what) => ipcRenderer.send('shell:refresh', String(what)),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (patch) => ipcRenderer.invoke('settings:save', patch),
+  // GitHub: { kind: 'approve'|'merge'|'rerun', repo, number, runId? } → { ok | cancelled | error }
+  ghAction: (a) => ipcRenderer.invoke('gh:action', a),
+  ciDetails: (repo, runId) => ipcRenderer.invoke('gh:ci-details', { repo, runId }),
+  copy: (text) => ipcRenderer.invoke('clipboard:write', String(text)),
+  // Jira: move a ticket (after a native confirmation in main)
+  jiraTransition: (key, id) => ipcRenderer.invoke('jira:transition', { key, id }),
+  jiraTransitions: (key) => ipcRenderer.invoke('jira:transitions', key),
+  // Standup text: { text, lang, generatedAt } | { error }
+  buildStandup: () => ipcRenderer.invoke('standup:build'),
+  // AI agent hand-off: { kind: 'review'|'fix-ci', repo, number } | { kind: 'implement', key }
+  handoff: (req) => ipcRenderer.invoke('agent:handoff', req),
+  agentStatus: (opts) => ipcRenderer.invoke('agent:status', opts || {}),
+  onOpenStandup: (cb) => {
+    const listener = () => cb();
+    ipcRenderer.on('home:open-standup', listener);
+    return () => ipcRenderer.removeListener('home:open-standup', listener);
+  },
 });

@@ -17,7 +17,10 @@
           <div class="date" id="date"></div>
           <h1 id="greeting">Home</h1>
         </div>
-        <div class="up-next" id="up-next" hidden></div>
+        <div class="hero-side">
+          <button class="btn" id="standup-btn" type="button" title="Yesterday / today / blockers, ready to paste">Standup</button>
+          <div class="up-next" id="up-next" hidden></div>
+        </div>
       </header>
 
       <nav class="stats" id="stats" aria-label="Overview"></nav>
@@ -58,6 +61,19 @@
       </div>
     </div>
   </main>
+  <div class="modal" id="standup" hidden role="dialog" aria-labelledby="standup-title">
+    <div class="modal-box">
+      <header>
+        <h2 id="standup-title">Standup</h2>
+        <span class="spacer"></span>
+        <button class="btn small" id="standup-refresh" type="button">Refresh</button>
+        <button class="btn small primary" id="standup-copy" type="button">Copy</button>
+        <button class="link-btn" id="standup-close" type="button" aria-label="Close">✕</button>
+      </header>
+      <pre id="standup-text"></pre>
+      <div class="modal-meta" id="standup-meta"></div>
+    </div>
+  </div>
   <script src="common.js"></script>
   <script src="home.js"></script>
 </body>

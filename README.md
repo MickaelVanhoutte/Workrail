@@ -12,6 +12,7 @@ Built with Electron, for **macOS, Windows and Linux**. Google apps run in their 
 - **Reviews**: pull requests waiting for your review (via the GitHub CLI), people before bots, stale ones folded away, per-repo hiding.
 - **Jira**: tickets assigned to you with status, sprint and due date, linked to your pull requests by issue key (`[PROJ-123]` in the PR title).
 - **Meetings**: next-meeting pill in Chat's top bar, a reminder notification before each meeting, a weekday morning summary.
+- **Act from Home**: approve, merge, re-run failed CI (with the failing lines shown), move Jira tickets, copy a ready-made standup, hand a PR or a ticket to your AI coding agent. See [Workflow](#workflow).
 
 ## Install
 
@@ -78,6 +79,27 @@ Notes:
 4. **Jira** (optional): in **Settings**, enter your site (`yourcompany.atlassian.net`), then open the Jira view and sign in once. An optional JQL filter narrows your tickets down, e.g. `assignee = currentUser() AND statusCategory != Done AND project = PROJ`.
 5. In Settings you can also hide repositories from Reviews (`my-org/old-team-*`), set the meeting reminder and the morning summary time.
 
+## Workflow
+
+Everything below runs on your machine with your own logins; anything that changes GitHub or Jira asks for confirmation first.
+
+- **GitHub** (via `gh`): *Approve* on reviews, *Merge* on approved PRs (with the repository's default method), and on a failing PR *Why?* shows the failing check. For GitHub Actions it also shows the error lines and the log excerpt, plus *Re-run failed*; other checks (e.g. SonarQube) link to their page.
+- **Jira transitions**: when one of your open PRs references a ticket that isn't in a review status yet, or when its PR is merged and no open PR references it anymore, Home suggests the move (e.g. *→ CODE REVIEW*, *→ Done*). Targets come from your Jira workflow's own transitions, never hard-coded names. Keys are read from PR titles and branch names (`feat/proj-123-…`).
+- **Standup**: a few minutes before the first meeting matching *Daily / stand-up / scrum* (configurable), a notification offers your standup: yesterday (merged, opened, reviewed, tickets moved), today, blockers. It is only copied, never posted. French or English (system language by default). Also available any time from the *Standup* button on Home.
+- **AI agent hand-off**: *⚡ Review* (reviews), *⚡ Fix CI* (failing PRs) and *⚡ Implement* (tickets) open a terminal in the right repository (found in your code folders by its GitHub remote, or cloned on demand), check out the PR branch and start your agent with a prepared prompt. The prompt is written to a file and passed as a single argument: it is never interpreted by a shell.
+
+  | Agent | Command used |
+  |---|---|
+  | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude "<prompt>"` |
+  | [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli) | `copilot -i "<prompt>"` |
+  | [OpenCode](https://opencode.ai/docs/cli/) | `opencode --prompt "<prompt>"` |
+  | [Codex CLI](https://developers.openai.com/codex/cli) | `codex "<prompt>"` |
+  | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini -i "<prompt>"` |
+  | [Aider](https://aider.chat) | `aider --message "<prompt>"` (runs once) |
+  | Anything else | *Custom command* in Settings, e.g. `mytool --ask {prompt}` |
+
+  Settings → Workflow picks the agent (auto = first one installed), the terminal (macOS: Warp, iTerm, Terminal; Windows: Windows Terminal, PowerShell; Linux: your default terminal, GNOME Terminal, Konsole, Xfce Terminal, xterm) and your code folders.
+
 ## Keyboard shortcuts
 
 | Action | macOS | Windows / Linux |
@@ -115,6 +137,7 @@ npm install
 npm start          # run the app
 npm run dev        # DevTools protocol on :9222 + live reload of the Chat theme
 npm run smoke      # start, check that the window and Home load, exit (used by CI)
+npm test           # unit tests (agent launcher safety, parsing), also run by CI
 npm run dist       # installer for the current system, in dist/
 npm run icons      # re-render the app icon PNGs from scripts/make-icons.cjs
 ```

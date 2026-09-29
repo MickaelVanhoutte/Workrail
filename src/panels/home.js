@@ -21,7 +21,42 @@ const PRIORITY_RANK = { highest: 0, blocker: 0, critical: 0, high: 1, medium: 2,
 let focusExpanded = false;
 let lastState = null;
 
-const act = (action) => api.action(action);
+let agentName = null; // chosen AI agent (Settings), null = none installed
+const openDetails = new Set(); // "repo#number" of PRs with CI details open
+const ciCache = new Map(); // runId → failed log excerpt
+
+// Actions that change something go through main (native confirmation) and
+// report back here.
+async function act(action) {
+  if (action.type === 'gh') {
+    return report(await api.ghAction(action), { merge: 'Merged', approve: 'Approved', rerun: 'Re-run started' }[action.kind]);
+  }
+  if (action.type === 'jira-move') return report(await api.jiraTransition(action.key, action.id), 'Ticket moved');
+  if (action.type === 'handoff') {
+    toast(`Starting ${agentName || 'the agent'}…`);
+    return report(await api.handoff(action), (res) => `${res.agent} opened in a terminal`);
+  }
+  return api.action(action);
+}
+
+function report(res, okText) {
+  if (!res || res.cancelled) return;
+  if (res.error) toast(res.error, 'error');
+  else toast(typeof okText === 'function' ? okText(res) : okText, 'ok');
+}
+
+let toastTimer = null;
+function toast(text, kind = '') {
+  let box = document.getElementById('toast');
+  if (!box) {
+    box = el('div', { id: 'toast', role: 'status' });
+    document.body.append(box);
+  }
+  box.className = `toast show ${kind}`;
+  box.textContent = text;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => box.classList.remove('show'), kind === 'error' ? 7000 : 3500);
+}
 const daysSince = (ts) => Math.floor((Date.now() - new Date(ts).getTime()) / DAY);
 const isRecent = (ts) => daysSince(ts) < 30;
 
@@ -103,6 +138,23 @@ const scrollTo = (id) => $(id).scrollIntoView({ behavior: 'smooth', block: 'star
 const waitLevel = (days) => (days > 5 ? 'urgent' : days > 2 ? 'high' : '');
 const todayStr = () => new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD, local
 const keysIn = (text) => [...new Set(text.match(KEY_RE) || [])];
+// Keys of a PR: from its title, plus its branch ("feat/proj-123-…") when the
+// key is one of my tickets (branches are often lower-case).
+function prKeys(p, state = lastState) {
+  const known = new Set((state?.jira?.issues || []).map((i) => i.key));
+  const fromBranch = (String(p.branch || '').match(/[A-Za-z][A-Za-z0-9_]+-\d+/g) || []).map((k) => k.toUpperCase()).filter((k) => known.has(k));
+  return [...new Set([...keysIn(p.title || ''), ...fromBranch])];
+}
+
+// "⚡ Review" etc.: hand the work to the AI agent chosen in Settings.
+function agentBtn(label, req) {
+  if (!agentName) return null;
+  const b = button(`⚡ ${label}`, () => act({ type: 'handoff', ...req }), false, true);
+  b.title = `Open ${agentName} in a terminal on this`;
+  b.classList.add('agent');
+  return b;
+}
+const smallBtn = (text, onClick, primary = false) => button(text, onClick, primary, true);
 const jiraSite = (state) => state.jira?.site || null;
 
 function keyChip(state, key) {
@@ -177,7 +229,7 @@ function renderHero(state) {
         el('div', { class: 'label', text: label }),
         el('div', { class: 'title', text: next.title, title: next.title }),
         el('div', { class: 'when', text: when })),
-      next.meetUrl ? button('Join', () => act({ type: 'meet', url: next.meetUrl }), true) : null);
+      next.meetUrl ? button('Join', () => act({ type: 'meet', url: next.meetUrl }), true) : '');
   } else {
     const slot = state.home?.slots?.[0];
     box.className = 'up-next free';
@@ -186,7 +238,7 @@ function renderHero(state) {
       el('div', { class: 'grow' },
         el('div', { class: 'label', text: 'Calendar' }),
         el('div', { class: 'title', text: 'No more meetings today' }),
-        slot ? el('div', { class: 'when', text: `Free until ${fmtTime(slot.end)}` }) : null));
+        slot ? el('div', { class: 'when', text: `Free until ${fmtTime(slot.end)}` }) : ''));
   }
 }
 
@@ -373,16 +425,23 @@ function prPill(p) {
 
 function ticketRow(state, t) {
   // My open PRs mentioning this ticket.
-  const prs = (state.github?.mine || []).filter((p) => keysIn(p.title).includes(t.key));
+  const prs = (state.github?.mine || []).filter((p) => prKeys(p, state).includes(t.key));
+  const sug = (state.jira?.suggestions || []).find((x) => x.key === t.key);
+  const move = sug
+    ? smallBtn(`→ ${sug.target.to}`, () => act({ type: 'jira-move', key: t.key, id: sug.target.id }), true)
+    : null;
+  if (move) move.title = sug.kind === 'next' ? `PR #${sug.pr.number} is merged` : `PR #${sug.pr.number} is open`;
   return row({
     lead: ico('ticket', 'ticket', true),
     title: t.summary,
     sub: [t.key, t.sprint?.name, t.type].filter(Boolean).join(' · '),
     trail: [
+      move,
       ...prs.slice(0, 2).map(prPill),
       dueChip(t.due),
       lozenge(t),
       el('span', { class: `prio ${t.priority.toLowerCase()}`, title: `${t.priority || 'No'} priority` }),
+      agentBtn('Implement', { kind: 'implement', key: t.key }),
     ],
     tooltip: `${t.key} · ${t.type}${t.priority ? ` · ${t.priority}` : ''}`,
     onClick: () => act({ type: 'jira', url: t.url }),
@@ -441,7 +500,13 @@ function renderReviews(state) {
       lead: r.avatar ? el('img', { class: 'avatar', src: `${r.avatar}${r.avatar.includes('?') ? '&' : '?'}s=64`, alt: '' }) : ico('review'),
       title: r.title,
       sub: `${r.repo}#${r.number} · ${r.author}`,
-      trail: [chip(days <= 0 ? 'today' : `${days} d waiting`, waitLevel(days))],
+      trail: [
+        // Approved before, then re-requested (new commits since).
+        r.approved ? chip('Re-review', '') : null,
+        chip(days <= 0 ? 'today' : `${days} d waiting`, waitLevel(days)),
+        r.approved ? null : smallBtn('Approve', () => act({ type: 'gh', kind: 'approve', repo: r.repo, number: r.number })),
+        agentBtn('Review', { kind: 'review', repo: r.repo, number: r.number }),
+      ],
       tooltip: r.url,
       onClick: () => act({ type: 'pr', url: r.url }),
     });
@@ -457,14 +522,64 @@ function renderReviews(state) {
 }
 
 function mineRow(p) {
-  return row({
+  const id = `${p.repo}#${p.number}`;
+  const failing = p.status === 'ci-failed';
+  const trail = [
+    ...prKeys(p).slice(0, 1).map((k) => keyChip(lastState, k)),
+    p.status === 'ready' ? smallBtn('Merge', () => act({ type: 'gh', kind: 'merge', repo: p.repo, number: p.number }), true) : null,
+    failing ? linkBtn(openDetails.has(id) ? 'Hide' : 'Why?', () => {
+      if (openDetails.has(id)) openDetails.delete(id);
+      else openDetails.add(id);
+      renderMine(lastState);
+    }) : null,
+    failing ? agentBtn('Fix CI', { kind: 'fix-ci', repo: p.repo, number: p.number }) : null,
+    el('span', { class: `pill ${p.status}`, text: MINE_LABEL[p.status] || p.status }),
+  ];
+  const r = row({
     lead: ico('pr', 'pr', true),
     title: p.title,
     sub: `${p.repo}#${p.number}${p.pendingReviewers ? ` · ${p.pendingReviewers} reviewer${p.pendingReviewers > 1 ? 's' : ''} pending` : ''} · updated ${ago(p.updatedAt)}`,
-    trail: [...keysIn(p.title).slice(0, 1).map((k) => keyChip(lastState, k)), el('span', { class: `pill ${p.status}`, text: MINE_LABEL[p.status] || p.status })],
+    trail,
     tooltip: p.url,
     onClick: () => act({ type: 'pr', url: p.url }),
   });
+  return failing && openDetails.has(id) ? [r, ciDetails(p)] : [r];
+}
+
+// Why CI fails: GitHub Actions jobs show their error lines (+ log) and can be
+// re-run; other checks (SonarQube…) only link out.
+function ciDetails(p) {
+  const box = el('div', { class: 'ci-details' });
+  for (const c of p.failed || []) {
+    const head = el('div', { class: 'ci-check' },
+      el('span', { class: 'ci-name', text: `✗ ${c.name}` }),
+      c.runId ? smallBtn('Re-run failed', () => act({ type: 'gh', kind: 'rerun', repo: p.repo, number: p.number, runId: c.runId })) : null,
+      c.url ? linkBtn('Open', () => act({ type: 'pr', url: c.url })) : null);
+    box.append(head);
+    if (!c.runId) {
+      box.append(el('div', { class: 'ci-note', text: 'External check: details on its own page.' }));
+      continue;
+    }
+    const body = el('div', { class: 'ci-body', text: 'Loading the failure…' });
+    box.append(body);
+    const show = (d) => {
+      if (!d || d.error) return body.replaceChildren(document.createTextNode(`Could not read the log: ${d?.error || 'unknown error'}`));
+      if (d.expired) return body.replaceChildren(document.createTextNode('Logs are no longer available for this run.'));
+      body.replaceChildren(...[
+        d.errors.length ? el('ul', { class: 'ci-errors' }, ...d.errors.map((x) => el('li', { text: x }))) : null,
+        d.text ? el('details', {}, el('summary', { text: `Log (${d.job})` }), el('pre', { text: d.text })) : null,
+      ].filter(Boolean));
+    };
+    if (ciCache.has(c.runId)) show(ciCache.get(c.runId));
+    else {
+      api.ciDetails(p.repo, c.runId).then((d) => {
+        ciCache.set(c.runId, d);
+        show(d);
+      });
+    }
+  }
+  if (!(p.failed || []).length) box.append(el('div', { class: 'ci-note', text: 'No failing check details reported.' }));
+  return box;
 }
 
 function renderMine(state) {
@@ -476,9 +591,9 @@ function renderMine(state) {
   // Abandoned PRs (no activity for 30 days) are folded away.
   const inactive = all.filter((p) => !isRecent(p.updatedAt)).sort(byStatus);
   section('mine', active.length || '', [
-    active.length ? active.map(mineRow) : note('No active pull request.'),
+    active.length ? active.flatMap(mineRow) : note('No active pull request.'),
     inactive.length
-      ? el('details', { class: 'inactive' }, el('summary', { text: `Inactive for 30+ days (${inactive.length})` }), ...inactive.map(mineRow))
+      ? el('details', { class: 'inactive' }, el('summary', { text: `Inactive for 30+ days (${inactive.length})` }), ...inactive.flatMap(mineRow))
       : null,
   ]);
 }
@@ -604,6 +719,38 @@ for (const a of document.querySelectorAll('.see-all')) {
     api.select(a.dataset.view);
   });
 }
+
+// --- standup ---------------------------------------------------------------------
+
+async function openStandup() {
+  const modal = $('standup');
+  const text = $('standup-text');
+  modal.hidden = false;
+  text.textContent = 'Preparing…';
+  const res = await api.buildStandup();
+  if (!res || res.error) {
+    text.textContent = `Could not build the standup: ${res?.error || 'unknown error'}`;
+    return;
+  }
+  text.textContent = res.text;
+  $('standup-meta').textContent = res.partial ? 'Some sources were unavailable (GitHub or Jira): check before sending.' : '';
+}
+
+$('standup-btn').addEventListener('click', openStandup);
+$('standup-close').addEventListener('click', () => { $('standup').hidden = true; });
+$('standup-refresh').addEventListener('click', openStandup);
+$('standup-copy').addEventListener('click', async () => {
+  if (await api.copy($('standup-text').textContent)) toast('Standup copied', 'ok');
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') $('standup').hidden = true;
+});
+api.onOpenStandup(openStandup);
+
+api.agentStatus().then((st) => {
+  agentName = st?.agent?.name || null;
+  if (lastState) render(lastState);
+});
 
 api.onState(render);
 api.getState().then(render);

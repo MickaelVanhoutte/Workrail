@@ -1,6 +1,7 @@
 // Pull requests via the gh CLI (reuses its login; the token never passes
-// through this app): reviews requested from the user, and the user's own
-// open PRs with their review / CI state. One GraphQL call per poll.
+// through this app): reviews requested from the user, the user's own open
+// PRs with their review / CI state, and the user's recently merged PRs.
+// One GraphQL call per poll.
 const { app, Notification, shell } = require('electron');
 const { execFile } = require('child_process');
 const fs = require('fs');
@@ -20,16 +21,19 @@ const GH_CANDIDATES = {
 // Direct requests only by default; team requests are opt-in (much noisier).
 const reviewQuery = (teams) => `is:open is:pr ${teams ? 'review-requested' : 'user-review-requested'}:@me archived:false`;
 const MINE_QUERY = 'is:open is:pr author:@me archived:false';
+// Merged in the last 7 days: Jira "next step" suggestions and the standup.
+const mergedQuery = () => `is:pr author:@me is:merged merged:>=${new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10)}`;
 
 const GRAPHQL = `
-query($reviews: String!, $mine: String!) {
+query($reviews: String!, $mine: String!, $merged: String!) {
   viewer { login }
   reviews: search(query: $reviews, type: ISSUE, first: 100) {
     issueCount
     nodes { ... on PullRequest {
-      databaseId number title url state isDraft createdAt updatedAt
+      databaseId number title url state isDraft createdAt updatedAt headRefName
       repository { nameWithOwner }
       author { login avatarUrl __typename }
+      viewerLatestReview { state }
       timelineItems(itemTypes: REVIEW_REQUESTED_EVENT, last: 20) {
         nodes { ... on ReviewRequestedEvent {
           createdAt
@@ -41,10 +45,21 @@ query($reviews: String!, $mine: String!) {
   mine: search(query: $mine, type: ISSUE, first: 50) {
     nodes { ... on PullRequest {
       databaseId number title url state isDraft createdAt updatedAt
-      reviewDecision mergeable
-      repository { nameWithOwner }
+      reviewDecision mergeable headRefName
+      repository { nameWithOwner viewerDefaultMergeMethod }
       reviewRequests(first: 1) { totalCount }
-      commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+      commits(last: 1) { nodes { commit { statusCheckRollup { state
+        contexts(first: 30) { nodes { __typename
+          ... on CheckRun { name conclusion detailsUrl }
+          ... on StatusContext { context state targetUrl }
+        } }
+      } } } }
+    } }
+  }
+  merged: search(query: $merged, type: ISSUE, first: 30) {
+    nodes { ... on PullRequest {
+      number title url mergedAt headRefName
+      repository { nameWithOwner }
     } }
   }
 }`;
@@ -101,6 +116,9 @@ function toReview(n, viewer) {
     createdAt: n.createdAt,
     updatedAt: n.updatedAt,
     requestedAt,
+    branch: n.headRefName || '',
+    // Already approved by me (Approve button hidden).
+    approved: n.viewerLatestReview?.state === 'APPROVED',
   };
 }
 
@@ -116,6 +134,19 @@ function mineStatus(n) {
   return 'waiting';
 }
 
+// Failing checks: GitHub Actions jobs carry a run id (re-run, logs); other
+// providers (SonarQube…) only a link.
+function failedChecks(n) {
+  const nodes = n.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts?.nodes || [];
+  return nodes
+    .filter((c) => ['FAILURE', 'ERROR', 'TIMED_OUT', 'STARTUP_FAILURE'].includes(c.conclusion || c.state))
+    .map((c) => {
+      const url = c.detailsUrl || c.targetUrl || '';
+      const runId = url.match(/\/actions\/runs\/(\d+)/)?.[1] || null;
+      return { name: c.name || c.context || 'check', url, runId };
+    });
+}
+
 const toMine = (n) => ({
   id: n.databaseId,
   number: n.number,
@@ -124,6 +155,9 @@ const toMine = (n) => ({
   repo: n.repository.nameWithOwner,
   status: mineStatus(n),
   pendingReviewers: n.reviewRequests?.totalCount || 0,
+  branch: n.headRefName || '',
+  mergeMethod: n.repository.viewerDefaultMergeMethod || 'MERGE',
+  failed: failedChecks(n),
   createdAt: n.createdAt,
   updatedAt: n.updatedAt,
 });
@@ -167,7 +201,8 @@ function start({ includeTeams = false, exclude = [], onUpdate }) {
       const out = await run(gh, ['api', 'graphql',
         '-f', `query=${GRAPHQL}`,
         '-f', `reviews=${reviewQuery(includeTeams)}`,
-        '-f', `mine=${MINE_QUERY}`]);
+        '-f', `mine=${MINE_QUERY}`,
+        '-f', `merged=${mergedQuery()}`]);
       const { data } = JSON.parse(out);
       const viewer = data.viewer.login;
       // The search index can lag behind merges/closes: trust the PR's own state.
@@ -176,6 +211,10 @@ function start({ includeTeams = false, exclude = [], onUpdate }) {
       const reviews = allReviews.filter((p) => !excluded(p.repo));
       const hidden = allReviews.length - reviews.length;
       const mine = data.mine.nodes.filter(open).map(toMine).filter((p) => !excluded(p.repo));
+      const merged = data.merged.nodes.filter((n) => n.repository && !excluded(n.repository.nameWithOwner)).map((n) => ({
+        number: n.number, title: n.title, url: n.url, mergedAt: n.mergedAt,
+        branch: n.headRefName || '', repo: n.repository.nameWithOwner,
+      }));
 
       // Notify genuinely new, recent requests from people. First run or a big
       // jump (e.g. team requests just turned on) is absorbed silently.
@@ -192,6 +231,7 @@ function start({ includeTeams = false, exclude = [], onUpdate }) {
         viewer,
         reviews,
         mine,
+        merged,
         total: data.reviews.issueCount - hidden,
         hidden,
         includeTeams,
@@ -210,4 +250,42 @@ function start({ includeTeams = false, exclude = [], onUpdate }) {
   return { refresh: poll, stop: () => clearTimeout(timer) };
 }
 
-module.exports = { start, mineStatus };
+// My activity in a time window (standup "yesterday"): PRs opened and
+// reviews submitted. Uses search (the contributions API leaves out orgs with
+// SSO), then keeps what really happened in the window: search dates are per
+// day and "updated" also moves for others' activity.
+const ACTIVITY_QUERY = `
+query($opened: String!, $reviewed: String!) {
+  viewer { login }
+  opened: search(query: $opened, type: ISSUE, first: 50) {
+    nodes { ... on PullRequest { number title url createdAt repository { nameWithOwner } } }
+  }
+  reviewed: search(query: $reviewed, type: ISSUE, first: 50) {
+    nodes { ... on PullRequest { number title url repository { nameWithOwner }
+      reviews(last: 30) { nodes { author { login } state submittedAt } }
+    } }
+  }
+}`;
+
+async function contributions(from) {
+  const gh = await resolveGh();
+  if (!gh) throw new Error('GitHub CLI (gh) not found');
+  const day = from.toISOString().slice(0, 10);
+  const out = await run(gh, ['api', 'graphql', '-f', `query=${ACTIVITY_QUERY}`,
+    '-f', `opened=is:pr author:@me created:>=${day}`,
+    '-f', `reviewed=is:pr reviewed-by:@me -author:@me updated:>=${day}`]);
+  const { data } = JSON.parse(out);
+  const me = data.viewer.login;
+  const since = from.getTime();
+  const base = (n) => ({ number: n.number, title: n.title, url: n.url, repo: n.repository.nameWithOwner });
+  return {
+    opened: data.opened.nodes.filter((n) => n.repository && new Date(n.createdAt).getTime() >= since)
+      .map((n) => ({ ...base(n), at: n.createdAt })),
+    reviewed: data.reviewed.nodes.filter((n) => n.repository).map((n) => {
+      const mine = (n.reviews?.nodes || []).filter((r) => r.author?.login === me && new Date(r.submittedAt).getTime() >= since);
+      return mine.length ? { ...base(n), at: mine.at(-1).submittedAt, state: mine.at(-1).state } : null;
+    }).filter(Boolean),
+  };
+}
+
+module.exports = { start, mineStatus, resolveGh, run, contributions, toMatcher };

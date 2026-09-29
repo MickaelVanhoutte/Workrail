@@ -14,7 +14,8 @@
     "dist": "electron-builder",
     "dist:mac": "electron-builder --mac --arm64",
     "dist:win": "electron-builder --win --x64",
-    "dist:linux": "electron-builder --linux --x64"
+    "dist:linux": "electron-builder --linux --x64",
+    "test": "node test/handoff.test.cjs"
   },
   "build": {
     "appId": "app.workrail.desktop",

@@ -37,6 +37,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Unit tests (launcher safety, parsing)
+        run: npm test
+
       - name: Smoke test (macOS / Windows)
         if: runner.os != 'Linux'
         run: npx electron . --smoke

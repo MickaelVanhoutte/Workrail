@@ -31,11 +31,42 @@ function prRow(pr) {
     e.stopPropagation();
     hideRepo(pr.repo);
   });
-  row.append(hide);
+  // Approve (not if already approved) and hand over to the AI agent.
+  const actions = el('div', { class: 'pr-actions' });
+  const add = (text, fn, cls = '') => {
+    const b = el('button', { class: `btn small ${cls}`, type: 'button', text });
+    b.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const res = await fn();
+      if (res?.error) status(res.error, true);
+      else if (res?.ok) status(text === 'Approve' ? `Approved ${pr.repo}#${pr.number}` : `${res.agent} opened in a terminal`);
+    });
+    actions.append(b);
+  };
+  if (pr.approved) actions.append(el('span', { class: 'tag', text: 'Re-review' }));
+  else add('Approve', () => api.ghAction({ kind: 'approve', repo: pr.repo, number: pr.number }));
+  if (agentName) add(`⚡ Review`, () => api.handoff({ kind: 'review', repo: pr.repo, number: pr.number }), 'agent');
+  row.append(actions, hide);
   const open = () => api.openExternal(pr.url);
   row.addEventListener('click', open);
   row.addEventListener('keydown', (e) => e.key === 'Enter' && open());
   return row;
+}
+
+let agentName = null;
+api.agentStatus().then((st) => {
+  agentName = st?.agent?.name || null;
+  api.getState().then(render);
+});
+
+// Short feedback line under the header.
+let statusTimer = null;
+function status(text, error = false) {
+  const note = el('span', { class: error ? 'flash error' : 'flash', text: ` · ${text}` });
+  meta.querySelector('.flash')?.remove();
+  meta.append(note);
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(() => note.remove(), 6000);
 }
 
 async function hideRepo(repo) {

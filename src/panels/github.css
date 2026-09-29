@@ -79,7 +79,20 @@ details.stale .pr { opacity: 0.75; }
 }
 .pr:hover .hide-repo { display: block; }
 .pr .hide-repo:hover { color: var(--gs-text); background: var(--gs-hover); }
-.pr-body { padding-right: 90px; }
+.pr-body { flex: 1; min-width: 0; }
 
 .hidden-link { color: var(--gs-link); text-decoration: none; }
 .hidden-link:hover { text-decoration: underline; }
+
+.pr-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.btn.small { height: 26px; padding: 0 10px; font-size: 12px; }
+.btn.agent { border-color: #d9ccef; background: #f7f3fd; color: #5b2fa6; }
+.pr:hover .pr-actions { margin-right: 90px; } /* room for "Hide repo" */
+.flash { color: var(--gs-green); font-weight: 700; }
+.flash.error { color: #e01e5a; }

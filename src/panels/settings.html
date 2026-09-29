@@ -66,6 +66,52 @@
     </section>
 
     <section class="card">
+      <h2>Workflow</h2>
+      <h3>Standup</h3>
+      <label class="field">
+        <span>Language</span>
+        <select id="standup-language">
+          <option value="auto">System language</option>
+          <option value="fr">Français</option>
+          <option value="en">English</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Ready before</span>
+        <select id="standup-lead">
+          <option value="0">Off</option>
+          <option value="5">5 min</option>
+          <option value="10">10 min</option>
+          <option value="15">15 min</option>
+        </select>
+        <span class="inline-help">the first meeting whose title matches</span>
+        <input type="text" id="standup-match" spellcheck="false" class="grow">
+      </label>
+
+      <h3>AI agent</h3>
+      <label class="field">
+        <span>Agent</span>
+        <select id="agent"></select>
+      </label>
+      <label class="field-col" id="agent-custom-row" hidden>
+        <span>Custom command</span>
+        <input type="text" id="agent-command" spellcheck="false" placeholder="mytool --ask {prompt}">
+        <small><code>{prompt}</code> is replaced by the prompt, passed as a single argument.</small>
+      </label>
+      <label class="field">
+        <span>Terminal</span>
+        <select id="terminal"></select>
+      </label>
+      <label class="field-col">
+        <span>Code folders</span>
+        <textarea id="code-folders" rows="2" spellcheck="false"></textarea>
+        <small>One per line; repositories are found by their GitHub remote (up to 3 levels deep). Empty = the usual folders for this system.</small>
+      </label>
+      <p class="status" id="agent-status"></p>
+      <button class="btn" type="button" id="rescan">Rescan repositories</button>
+    </section>
+
+    <section class="card">
       <h2>GitHub</h2>
       <label class="check">
         <input type="checkbox" id="github">

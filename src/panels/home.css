@@ -515,3 +515,124 @@ details.inactive .row { opacity: 0.65; }
   padding: 0 10px;
   font-size: 12px;
 }
+
+/* --- actions ------------------------------------------------------------------------- */
+
+.hero-side {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.row .btn.small { flex: none; }
+.btn.agent {
+  border-color: #d9ccef;
+  background: #f7f3fd;
+  color: #5b2fa6;
+}
+.btn.agent:hover { background: #efe7fb; }
+
+/* CI failure details under a PR row */
+.ci-details {
+  margin: 0 16px 10px 56px;
+  padding: 10px 12px;
+  border: 1px solid #f5c2d0;
+  border-radius: 8px;
+  background: var(--tint-urgent);
+  font-size: 13px;
+}
+.ci-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0;
+}
+.ci-name { flex: 1; font-weight: 700; color: var(--urgent); }
+.ci-note,
+.ci-body { color: var(--gs-muted); margin: 2px 0 6px; }
+.ci-errors {
+  margin: 4px 0;
+  padding-left: 18px;
+  color: var(--gs-text);
+  font-weight: 700;
+}
+.ci-body pre {
+  max-height: 240px;
+  overflow: auto;
+  margin: 6px 0 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: #1d1c1d;
+  color: #e8e8e8;
+  font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+}
+.ci-body summary { cursor: pointer; }
+
+/* --- toast --------------------------------------------------------------------------- */
+
+.toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 10;
+  max-width: 420px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #1d1c1d;
+  color: #fff;
+  font-size: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.15s, transform 0.15s;
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: none; }
+.toast.ok { background: var(--ok); }
+.toast.error { background: var(--urgent); }
+
+/* --- standup modal ------------------------------------------------------------------------ */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.4);
+}
+.modal[hidden] { display: none; }
+.modal-box {
+  width: min(640px, calc(100vw - 48px));
+  max-height: calc(100vh - 120px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  background: var(--gs-bg);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.3);
+}
+.modal-box > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--gs-border);
+}
+.modal-box h2 { margin: 0; font-size: 16px; font-weight: 900; }
+.modal-box .spacer { flex: 1; }
+.modal-box pre {
+  flex: 1;
+  overflow: auto;
+  margin: 0;
+  padding: 16px 20px;
+  font: 14px/1.6 var(--gs-font);
+  white-space: pre-wrap;
+}
+.modal-meta { padding: 0 20px 12px; color: var(--high); font-size: 12px; }
+.modal-meta:empty { display: none; }
+
+/* Implement: only on hover, the card stays readable */
+#tickets .row .btn.agent { visibility: hidden; }
+#tickets .row:hover .btn.agent,
+#tickets .row:focus-within .btn.agent { visibility: visible; }

@@ -97,3 +97,14 @@ textarea:focus {
 }
 
 .help.tight { margin: 6px 0 0; font-size: 13px; }
+
+.card h3 {
+  margin: 18px 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--gs-muted);
+}
+.field .inline-help { font-weight: 400; color: var(--gs-muted); }
+.field .grow { flex: 1; min-width: 160px; }

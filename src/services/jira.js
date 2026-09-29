@@ -107,8 +107,67 @@ function start({ ses, site, jql, onUpdate, onOpen }) {
     timer = setTimeout(poll, INTERVAL);
   };
 
+  // --- on-demand helpers (Home actions, standup, agent hand-off) -----------
+
+  const KEY = /^[A-Z][A-Z0-9_]+-\d+$/;
+  const transitionsCache = new Map(); // key → { at, list }
+
+  // Workflow transitions available from the ticket's current status.
+  async function transitions(key) {
+    if (!KEY.test(key)) throw new Error('Invalid issue key');
+    const hit = transitionsCache.get(key);
+    if (hit && Date.now() - hit.at < 5 * 60 * 1000) return hit.list;
+    const data = await get(`/rest/api/3/issue/${key}/transitions`);
+    const list = (data.transitions || []).map((t) => ({
+      id: t.id, name: t.name, to: t.to?.name || t.name, category: t.to?.statusCategory?.key || '',
+    }));
+    transitionsCache.set(key, { at: Date.now(), list });
+    return list;
+  }
+
+  async function transition(key, id) {
+    if (!KEY.test(key) || !/^\d+$/.test(String(id))) throw new Error('Invalid transition');
+    const res = await ses.fetch(`${base}/rest/api/3/issue/${key}/transitions`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-Atlassian-Token': 'no-check' },
+      body: JSON.stringify({ transition: { id: String(id) } }),
+      redirect: 'manual',
+    });
+    if (res.status === 401 || res.status === 403) throw new AuthError(`Jira refused the change (HTTP ${res.status})`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.errorMessages?.join(' ') || Object.values(body.errors || {}).join(' ') || `HTTP ${res.status}`);
+    }
+    transitionsCache.delete(key);
+    poll();
+  }
+
+  // Tickets whose status I changed since a date (standup "yesterday").
+  async function movedSince(dateStr) {
+    const jqlMoved = `status CHANGED BY currentUser() AFTER "${dateStr}" ORDER BY updated DESC`;
+    const params = new URLSearchParams({ jql: jqlMoved, maxResults: '30', fields: 'summary,status' });
+    const data = await get(`/rest/api/3/search/jql?${params}`);
+    return (data.issues || []).map((i) => ({ key: i.key, summary: i.fields.summary || '', status: i.fields.status?.name || '' }));
+  }
+
+  // Plain-text description (Atlassian Document Format → text), for prompts.
+  async function description(key) {
+    if (!KEY.test(key)) throw new Error('Invalid issue key');
+    const data = await get(`/rest/api/3/issue/${key}?fields=description,summary`);
+    const text = [];
+    const walk = (n) => {
+      if (!n) return;
+      if (n.type === 'text') text.push(n.text);
+      if (n.type === 'hardBreak') text.push('\n');
+      (n.content || []).forEach(walk);
+      if (['paragraph', 'heading', 'listItem', 'codeBlock', 'blockquote'].includes(n.type)) text.push('\n');
+    };
+    walk(data.fields?.description);
+    return { summary: data.fields?.summary || '', description: text.join('').replace(/\n{3,}/g, '\n\n').trim() };
+  }
+
   poll();
-  return { refresh: poll, stop: () => clearTimeout(timer) };
+  return { refresh: poll, stop: () => clearTimeout(timer), transitions, transition, movedSince, description };
 }
 
 module.exports = { start, DEFAULT_JQL };

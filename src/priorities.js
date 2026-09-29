@@ -93,7 +93,10 @@ function actions(state, now = Date.now()) {
       reason: rule.reason,
       score: rule.score,
       button: rule.button,
-      action: { type: 'pr', url: pr.url },
+      // Ready: merge right from Home (confirmed in main); otherwise open it.
+      action: pr.status === 'ready'
+        ? { type: 'gh', kind: 'merge', repo: pr.repo, number: pr.number }
+        : { type: 'pr', url: pr.url },
     });
   }
 
@@ -104,9 +107,11 @@ function actions(state, now = Date.now()) {
       kind: 'review',
       title: r.title,
       detail: `${r.repo}#${r.number} · by ${r.author}`,
-      tag: days <= 0 ? 'Requested today' : `${days} d waiting`,
-      reason: days > 2 ? `Review requested ${days} days ago` : 'Review requested recently',
-      score: days > 2 ? Math.min(75, 60 + days) : 45,
+      tag: r.approved ? 'Re-review' : days <= 0 ? 'Requested today' : `${days} d waiting`,
+      // Approved before and re-requested (new commits): a quicker look.
+      reason: r.approved ? 'You approved it; a new review was requested since'
+        : days > 2 ? `Review requested ${days} days ago` : 'Review requested recently',
+      score: r.approved ? 40 : days > 2 ? Math.min(75, 60 + days) : 45,
       button: 'Review',
       action: { type: 'pr', url: r.url },
     });
@@ -138,6 +143,24 @@ function actions(state, now = Date.now()) {
       action: { type: 'jira', url: t.url },
     });
   }
+  // Obvious workflow moves (keys.js): PR opened → review, PR merged → next.
+  for (const sug of state.jira?.suggestions || []) {
+    const t = tickets.find((x) => x.key === sug.key);
+    if (!t) continue;
+    out.push({
+      kind: 'ticket',
+      title: `Move ${sug.key} to ${sug.target.to}`,
+      detail: `${t.summary} · PR #${sug.pr.number} ${sug.kind === 'next' ? 'merged' : 'open'}`,
+      tag: `→ ${sug.target.to}`,
+      reason: sug.kind === 'next'
+        ? `Its pull request ${sug.pr.repo}#${sug.pr.number} is merged, the ticket is still ${t.status}`
+        : `Pull request ${sug.pr.repo}#${sug.pr.number} is open, the ticket is still ${t.status}`,
+      score: 57,
+      button: 'Move',
+      action: { type: 'jira-move', key: sug.key, id: sug.target.id },
+    });
+  }
+
   // Sprint about to end with my tickets still open: one grouped item.
   const ending = tickets.filter((t) => t.sprint?.state === 'active' && t.sprint.endDate
     && new Date(t.sprint.endDate).getTime() > now && new Date(t.sprint.endDate).getTime() - now <= 2 * DAY);

@@ -17,6 +17,14 @@ const jira = $('jira');
 const jiraSite = $('jira-site');
 const jiraJql = $('jira-jql');
 const jiraStatus = $('jira-status');
+const standupLanguage = $('standup-language');
+const standupLead = $('standup-lead');
+const standupMatch = $('standup-match');
+const agentSel = $('agent');
+const agentCommand = $('agent-command');
+const terminalSel = $('terminal');
+const codeFolders = $('code-folders');
+const agentStatusEl = $('agent-status');
 
 let current = null;
 let lastState = null;
@@ -81,6 +89,11 @@ function renderSettings() {
   githubTeams.checked = !!current.githubTeams;
   githubTeams.disabled = !current.github;
   if (document.activeElement !== githubExclude) githubExclude.value = (current.githubExclude || []).join('\n');
+  standupLanguage.value = current.standupLanguage || 'auto';
+  standupLead.value = String(current.standupLead ?? 5);
+  if (document.activeElement !== standupMatch) standupMatch.value = current.standupMatch || '';
+  if (document.activeElement !== agentCommand) agentCommand.value = current.agentCommand || '';
+  if (document.activeElement !== codeFolders) codeFolders.value = (current.codeFolders || []).join('\n');
   jira.checked = !!current.jira;
   if (document.activeElement !== jiraSite) jiraSite.value = current.jiraSite || '';
   if (document.activeElement !== jiraJql) jiraJql.value = current.jiraJql || '';
@@ -114,6 +127,60 @@ github.addEventListener('change', () => save({ github: github.checked }));
 githubTeams.addEventListener('change', () => save({ githubTeams: githubTeams.checked }));
 githubExclude.addEventListener('change', () => save({ githubExclude: githubExclude.value.split('\n') }));
 jira.addEventListener('change', () => save({ jira: jira.checked }));
+
+// --- workflow
+const option = (value, label) => {
+  const o = document.createElement('option');
+  o.value = value;
+  o.textContent = label;
+  return o;
+};
+
+async function renderAgentStatus(opts) {
+  const st = await api.agentStatus(opts);
+  if (!st) return;
+  const installed = new Set(st.agents.map((a) => a.id));
+  agentSel.replaceChildren(
+    option('auto', `Auto${st.agents[0] ? ` (${st.agents[0].name})` : ''}`),
+    ...st.presets.map((p) => option(p.id, installed.has(p.id) ? p.name : `${p.name} (not found)`)),
+    option('custom', 'Custom command…'),
+  );
+  agentSel.value = current?.agent || 'auto';
+  $('agent-custom-row').hidden = agentSel.value !== 'custom';
+  terminalSel.replaceChildren(
+    option('auto', `Auto${st.terminals[0] ? ` (${st.terminals[0].name})` : ''}`),
+    ...st.terminals.map((t) => option(t.id, t.name)),
+  );
+  terminalSel.value = current?.terminal || 'auto';
+  if (!(current?.codeFolders || []).length && document.activeElement !== codeFolders) codeFolders.placeholder = st.folders.join('\n');
+  const agentText = st.agent ? `${st.agent.name} ✓` : 'No AI agent found — install one or set a custom command';
+  setStatus(agentStatusEl, `${agentText} · ${st.repos} repositories in ${st.folders.length} folder(s)`, st.agent ? 'ok' : 'error');
+}
+
+standupLanguage.addEventListener('change', () => save({ standupLanguage: standupLanguage.value }));
+standupLead.addEventListener('change', () => save({ standupLead: Number(standupLead.value) }));
+standupMatch.addEventListener('change', async () => {
+  const res = await save({ standupMatch: standupMatch.value });
+  if (res?.error) setStatus(agentStatusEl, res.error, 'error');
+});
+agentSel.addEventListener('change', async () => {
+  $('agent-custom-row').hidden = agentSel.value !== 'custom';
+  await save({ agent: agentSel.value });
+  renderAgentStatus();
+});
+agentCommand.addEventListener('change', async () => {
+  await save({ agentCommand: agentCommand.value });
+  renderAgentStatus();
+});
+terminalSel.addEventListener('change', () => save({ terminal: terminalSel.value }));
+codeFolders.addEventListener('change', async () => {
+  await save({ codeFolders: codeFolders.value.split('\n') });
+  renderAgentStatus({ rescan: true });
+});
+$('rescan').addEventListener('click', () => {
+  setStatus(agentStatusEl, 'Scanning…');
+  renderAgentStatus({ rescan: true });
+});
 jiraSite.addEventListener('change', async () => {
   const res = await save({ jiraSite: jiraSite.value });
   if (res?.error) setStatus(jiraStatus, res.error, 'error');
@@ -134,4 +201,5 @@ api.getState().then((s) => {
 api.getSettings().then((s) => {
   current = s;
   renderSettings();
+  renderAgentStatus();
 });
