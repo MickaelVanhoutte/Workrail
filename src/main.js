@@ -193,6 +193,12 @@ function startServices(ses) {
   });
 }
 
+function refreshIfStale(maxAge = 60 * 1000) {
+  const stale = (x) => x?.status === 'ok' && Date.now() - (x.updatedAt || 0) > maxAge;
+  if (stale(state.github)) githubService?.refresh();
+  if (stale(state.jira)) jiraService?.refresh();
+}
+
 // --- window -----------------------------------------------------------------
 
 function showWindow() {
@@ -236,6 +242,7 @@ function createWindow() {
   if (ws.maximized) win.maximize();
 
   win.once('ready-to-show', () => win.show());
+  win.on('focus', () => state.active === 'home' && refreshIfStale());
   win.on('resize', saveWindowState);
   win.on('move', saveWindowState);
 
@@ -259,6 +266,9 @@ function createWindow() {
     onShow: (name) => {
       state.active = name;
       pushState();
+      // Back on Home: don't show data older than a minute (merged PRs,
+      // closed tickets).
+      if (name === 'home') refreshIfStale();
     },
     onReady: (name) => {
       if (name === 'chat') views.send('chat', 'gslack:next-meeting', state.calendar.next);

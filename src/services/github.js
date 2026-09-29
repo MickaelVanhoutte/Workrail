@@ -27,7 +27,7 @@ query($reviews: String!, $mine: String!) {
   reviews: search(query: $reviews, type: ISSUE, first: 100) {
     issueCount
     nodes { ... on PullRequest {
-      databaseId number title url isDraft createdAt updatedAt
+      databaseId number title url state isDraft createdAt updatedAt
       repository { nameWithOwner }
       author { login avatarUrl __typename }
       timelineItems(itemTypes: REVIEW_REQUESTED_EVENT, last: 20) {
@@ -40,7 +40,7 @@ query($reviews: String!, $mine: String!) {
   }
   mine: search(query: $mine, type: ISSUE, first: 50) {
     nodes { ... on PullRequest {
-      databaseId number title url isDraft createdAt updatedAt
+      databaseId number title url state isDraft createdAt updatedAt
       reviewDecision mergeable
       repository { nameWithOwner }
       reviewRequests(first: 1) { totalCount }
@@ -170,10 +170,12 @@ function start({ includeTeams = false, exclude = [], onUpdate }) {
         '-f', `mine=${MINE_QUERY}`]);
       const { data } = JSON.parse(out);
       const viewer = data.viewer.login;
-      const allReviews = data.reviews.nodes.filter((n) => n.repository).map((n) => toReview(n, viewer));
+      // The search index can lag behind merges/closes: trust the PR's own state.
+      const open = (n) => n.repository && n.state === 'OPEN';
+      const allReviews = data.reviews.nodes.filter(open).map((n) => toReview(n, viewer));
       const reviews = allReviews.filter((p) => !excluded(p.repo));
       const hidden = allReviews.length - reviews.length;
-      const mine = data.mine.nodes.filter((n) => n.repository).map(toMine).filter((p) => !excluded(p.repo));
+      const mine = data.mine.nodes.filter(open).map(toMine).filter((p) => !excluded(p.repo));
 
       // Notify genuinely new, recent requests from people. First run or a big
       // jump (e.g. team requests just turned on) is absorbed silently.
