@@ -30,6 +30,33 @@ contextBridge.exposeInMainWorld('gslackShell', {
   // AI agent hand-off: { kind: 'review'|'fix-ci', repo, number } | { kind: 'implement', key }
   handoff: (req) => ipcRenderer.invoke('agent:handoff', req),
   agentStatus: (opts) => ipcRenderer.invoke('agent:status', opts || {}),
+  // Message chips overlay (panels/chips.html)
+  onChip: (cb) => {
+    const listener = (_e, chip) => cb(chip);
+    ipcRenderer.on('chips:add', listener);
+    return () => ipcRenderer.removeListener('chips:add', listener);
+  },
+  chipsSize: (h) => ipcRenderer.send('chips:size', Number(h) || 0),
+  openChip: (source, id) => ipcRenderer.send('chips:open', { source: String(source), id: String(id) }),
+  // Home's Messages feed: open a message's conversation; dismiss one
+  // (feed id or conversation id) or 'all', which marks it read in Chat →
+  // { ok, failed }
+  feedOpen: (id) => ipcRenderer.send('feed:open', String(id)),
+  feedDismiss: (target) => ipcRenderer.invoke('feed:dismiss', String(target)),
+  // Work item hub: open a key (from any panel), load its data, and the
+  // messages main sends to the hub page.
+  openItem: (key) => ipcRenderer.send('item:open', String(key)),
+  loadItem: (key, opts) => ipcRenderer.invoke('item:load', String(key), opts || {}),
+  onOpenItem: (cb) => {
+    const listener = (_e, key) => cb(key);
+    ipcRenderer.on('item:open', listener);
+    return () => ipcRenderer.removeListener('item:open', listener);
+  },
+  onFocusSearch: (cb) => {
+    const listener = () => cb();
+    ipcRenderer.on('item:focus-search', listener);
+    return () => ipcRenderer.removeListener('item:focus-search', listener);
+  },
   onOpenStandup: (cb) => {
     const listener = () => cb();
     ipcRenderer.on('home:open-standup', listener);

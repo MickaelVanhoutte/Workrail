@@ -2,7 +2,7 @@
 // `npm run dev`) so selectors in src/inject/ can be tuned.
 //
 // Usage: npm run dump -- [out-file] [--js "expression"] [--shot file.png]
-//                          [--target chat|gmail|calendar|jira|home|github|settings|rail]
+//                          [--target chat|gmail|calendar|jira|home|github|settings|item|rail]
 // Output keeps tags, roles, aria-labels, data-* attributes and short text
 // snippets. It contains your chat content: keep it local.
 
@@ -23,6 +23,7 @@ const TARGETS = {
   jira: /atlassian\.net/,
   github: /panels\/github\.html$/,
   settings: /panels\/settings\.html$/,
+  item: /panels\/item\.html(#.*)?$/,
   rail: /shell\/rail\.html$/,
 };
 const outFile = args[0] || 'chat.dump.txt';

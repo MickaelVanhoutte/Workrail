@@ -13,6 +13,9 @@ const standup = require('./standup');
 const handoff = require('./handoff');
 const priorities = require('./priorities');
 const platform = require('./platform');
+const workitem = require('./services/workitem');
+const updates = require('./services/updates');
+const { createFeed } = require('./feed');
 
 const DEV = process.argv.includes('--dev');
 // CI check: open the window, load the local pages, exit (see README).
@@ -38,14 +41,16 @@ let calendarService = null;
 let gmailService = null;
 let jiraService = null;
 let googleSession = null;
+let updatesService = null;
 
 // Everything the rail and local panels display.
 const state = {
   active: 'home',
   user: { firstName: null },
   badges: { home: 0, chat: 0, gmail: 0, github: 0, jira: 0, calendar: '' },
-  chat: { conversations: [] },
+  chat: { conversations: [], feed: [] }, // feed: latest notified messages (feed.js)
   gmail: { status: 'loading', important: null },
+  update: null, // { version, url } when a newer release is out
   github: { status: 'loading', reviews: [], mine: [] },
   calendar: { status: 'unconfigured', next: null, today: [] },
   jira: { status: 'loading', issues: [] },
@@ -87,9 +92,11 @@ function computeHome(now = Date.now()) {
 
 function pushState() {
   if (!win || win.isDestroyed()) return;
+  feed.sync(state.chat.conversations);
+  state.chat.feed = feed.list();
   computeHome();
   win.webContents.send('shell:state', state);
-  for (const name of ['home', 'github', 'settings']) views?.send(name, 'shell:state', state);
+  for (const name of ['home', 'github', 'settings', 'item']) views?.send(name, 'shell:state', state);
 }
 
 function calendarBadge(next) {
@@ -178,9 +185,15 @@ function startJira() {
 function startServices(ses) {
   googleSession = ses;
   startJira();
-  gmailService = gmail.start(ses, ({ unread, important, account }) => {
+  gmailService = gmail.start(ses, ({ status, error, unread, latest, important, account }) => {
+    if (status !== 'ok') {
+      state.gmail = { status, error, important: null };
+      recentMail = [];
+      return pushState();
+    }
     state.badges.gmail = unread;
     state.gmail = { status: 'ok', important };
+    recentMail = [...(latest || []), ...(important || [])];
     // "jane.doe@…" → "Jane" for the Home greeting.
     const first = account?.split('@')[0].split(/[._-]/)[0];
     if (first) state.user.firstName = first.charAt(0).toUpperCase() + first.slice(1);
@@ -194,6 +207,19 @@ function startServices(ses) {
       state.calendar = { status, next, today: today || [] };
       state.badges.calendar = calendarBadge(next);
       views?.send('chat', 'gslack:next-meeting', next);
+      pushState();
+    },
+  });
+  startUpdates();
+}
+
+function startUpdates() {
+  updatesService?.stop();
+  updatesService = updates.start({
+    current: app.getVersion(),
+    enabled: () => settings.get('checkUpdates') !== false,
+    onUpdate: (u) => {
+      state.update = u;
       pushState();
     },
   });
@@ -222,6 +248,29 @@ function updateJiraSuggestions() {
   }, 500);
 }
 
+// Tell each Google view whether it is really looked at (Workrail in front,
+// on that view) and how its notifications should surface: a native one when
+// Workrail is in the background, a chip when Workrail is in front but you
+// are on another view (native too if chips are turned off).
+function updateVisibility() {
+  if (!win || win.isDestroyed() || !views) return;
+  const front = win.isVisible() && !win.isMinimized() && win.isFocused();
+  const mode = front && settings.get('messageChips') ? 'chip' : 'native';
+  for (const [name, wc] of views.googleViews()) {
+    if (!wc.isDestroyed()) wc.send('gslack:visibility', { hidden: !(front && views.active() === name), mode });
+  }
+  // Service workers ask the browser whether their tab is looked at: tell
+  // them the truth too (sw-preload.js).
+  for (const worker of swWorkers) {
+    if (worker.isDestroyed()) {
+      swWorkers.delete(worker);
+      continue;
+    }
+    const source = sourceOfScope(worker.scope);
+    worker.send('sw:visibility', { hidden: !(front && views.active() === source) });
+  }
+}
+
 function refreshIfStale(maxAge = 60 * 1000) {
   const stale = (x) => x?.status === 'ok' && Date.now() - (x.updatedAt || 0) > maxAge;
   if (stale(state.github)) githubService?.refresh();
@@ -245,7 +294,89 @@ function setupGoogleSession() {
     cb(allowed.includes(permission) && isGoogle(details.requestingUrl || wc.getURL()));
   });
   ses.setPermissionCheckHandler((_wc, permission, origin) => allowed.includes(permission) && isGoogle(origin));
+  watchServiceWorkers(ses);
   return ses;
+}
+
+// --- service-worker notifications ---------------------------------------------
+// Chat notifies from its service worker (web push), which Electron doesn't
+// display. sw-preload.js forwards them here; show them as a chip (Workrail in
+// front, another view), a native notification (Workrail in the background),
+// or nothing (you are already looking at that app).
+
+const swHooked = new WeakSet();
+const swWorkers = new Set(); // hooked service workers (to send them visibility)
+function watchServiceWorkers(ses) {
+  ses.registerPreloadScript({ type: 'service-worker', id: 'workrail-sw', filePath: path.join(__dirname, 'sw-preload.js') });
+  const hook = (versionId) => {
+    const worker = ses.serviceWorkers.getWorkerFromVersionID(versionId);
+    if (!worker || swHooked.has(worker)) return;
+    swHooked.add(worker);
+    if (DEV) console.log('[sw] hooked', worker.scope);
+    swWorkers.add(worker);
+    setTimeout(updateVisibility, 100);
+    worker.ipc.on('sw:notification', (_e, n) => onServiceWorkerNotification(worker.scope, n));
+  };
+  ses.serviceWorkers.on('running-status-changed', ({ versionId, runningStatus }) => {
+    if (runningStatus === 'running' || runningStatus === 'starting') hook(versionId);
+  });
+  for (const id of Object.keys(ses.serviceWorkers.getAllRunning())) hook(Number(id));
+}
+
+const sourceOfScope = (scope) => {
+  const u = (() => { try { return new URL(scope); } catch { return null; } })();
+  if (!u) return null;
+  if (u.hostname === 'chat.google.com' || (u.hostname === 'mail.google.com' && u.pathname.startsWith('/chat'))) return 'chat';
+  if (u.hostname === 'mail.google.com') return 'gmail';
+  if (u.hostname === 'calendar.google.com') return 'calendar';
+  return null;
+};
+
+let swSeq = 0;
+function onServiceWorkerNotification(scope, n) {
+  const source = sourceOfScope(scope);
+  if (!source || !n || typeof n !== 'object') return;
+  const str = (v, max) => String(v || '').slice(0, max);
+  const note = { title: str(n.title, 200), body: str(n.body, 600), icon: /^https:\/\//.test(n.icon || '') ? str(n.icon, 1000) : '', data: str(n.data, 4000) };
+  const front = win && win.isVisible() && !win.isMinimized() && win.isFocused();
+  if (DEV) {
+    console.log('[sw-notification]', JSON.stringify({ source, title: note.title, body: note.body.slice(0, 80), tag: n.tag, data: note.data.slice(0, 300),
+      front, focused: win?.isFocused(), active: views?.active() }));
+  }
+  if (source === 'chat') mentions.add({ title: note.title, body: note.body, source, group: groupOf(note.data) });
+  const id = `sw${Date.now()}-${++swSeq}`;
+  if (source === 'chat') addToFeed({ ...note, group: groupOf(note.data), noteId: id, source });
+  if (front && views?.active() === source) return; // you're looking at it
+  swNotes.set(id, { source, data: note.data });
+  setTimeout(() => swNotes.delete(id), 30 * 60 * 1000);
+  if (front) {
+    if (settings.get('messageChips')) views?.showChip({ id, source, title: note.title, body: note.body, icon: note.icon });
+    return;
+  }
+  showNative(note.title, note.body, () => openNotification(id));
+}
+
+// Notification clicked (chip or native): back to the app, on the right
+// conversation when the notification data names one.
+const swNotes = new Map();
+// Conversation named by a notification's data ("space/AAAA…", "dm/…", or
+// "spaces/…"): prefer one Chat lists as unread; else the first.
+const groupsIn = (data) => [...new Set([...String(data || '').matchAll(/\b(spaces?|dm)\/([\w-]+)/g)]
+  .map((m) => `${m[1] === 'dm' ? 'dm' : 'space'}/${m[2]}`))];
+const groupOf = (data) => {
+  const all = groupsIn(data);
+  const known = new Set(state.chat.conversations.map((c) => c.id));
+  return all.find((g) => known.has(g)) || all[0] || null;
+};
+function openNotification(id) {
+  const note = swNotes.get(id);
+  showWindow();
+  if (!note) return;
+  views?.show(note.source);
+  const group = groupOf(note.data);
+  if (note.source === 'chat' && group) {
+    views?.webContents('chat')?.executeJavaScript(`window.__gslack?.openGroup(${JSON.stringify(group)})`).catch(() => {});
+  }
 }
 
 function createWindow() {
@@ -272,6 +403,7 @@ function createWindow() {
 
   win.once('ready-to-show', () => win.show());
   win.on('focus', () => state.active === 'home' && refreshIfStale());
+  for (const ev of ['focus', 'blur', 'show', 'hide', 'minimize', 'restore']) win.on(ev, updateVisibility);
   win.on('resize', saveWindowState);
   win.on('move', saveWindowState);
 
@@ -292,12 +424,14 @@ function createWindow() {
   views = createViews(win, {
     userAgent: CHROME_UA,
     dev: DEV,
+    onOpenItem: openItem,
     onShow: (name) => {
       state.active = name;
       pushState();
       // Back on Home: don't show data older than a minute (merged PRs,
       // closed tickets).
       if (name === 'home') refreshIfStale();
+      updateVisibility();
     },
     onReady: (name) => {
       if (name === 'chat') views.send('chat', 'gslack:next-meeting', state.calendar.next);
@@ -325,16 +459,152 @@ function runSmokeTest() {
     wc.once('did-fail-load', (_e, code, desc) => reject(new Error(`${code} ${desc}`)));
   });
   const rail = loaded(win.webContents);
+  views.show('item');
+  const item = loaded(views.webContents('item'));
   views.show('home');
-  Promise.all([rail, loaded(views.webContents('home'))])
-    .then(() => views.webContents('home').executeJavaScript('document.getElementById("focus") ? "ok" : "missing"'))
-    .then((res) => {
-      if (res !== 'ok') return fail('Home did not render');
+  const has = (name, id) => views.webContents(name).executeJavaScript(`document.getElementById(${JSON.stringify(id)}) ? "ok" : "missing"`);
+  Promise.all([rail, item, loaded(views.webContents('home'))])
+    .then(() => Promise.all([has('home', 'focus'), has('item', 'find')]))
+    .then(([home, hub]) => {
+      if (home !== 'ok') return fail('Home did not render');
+      if (hub !== 'ok') return fail('Work item hub did not render');
       console.log(`[smoke] OK on ${process.platform}`);
       app.exit(0);
     })
     .catch((err) => fail(err.message));
 }
+
+// --- Home's Messages feed ------------------------------------------------------------
+// Latest Chat messages (from notifications), dismissed one conversation at a
+// time or all at once; dismissing marks the conversation read in Chat.
+
+const feed = createFeed();
+
+function addToFeed(n) {
+  // Ids only, never the message.
+  if (DEV) console.log('[feed] add', JSON.stringify({ via: n.noteId?.startsWith('sw') ? 'sw' : 'page', group: n.group, known: state.chat.conversations.some((c) => c.id === n.group) }));
+  if (!feed.add(n)) return;
+  pushState();
+}
+
+// Marks conversations read in Chat, one after the other (each opens a menu).
+async function markRead(groups) {
+  const wc = views?.webContents('chat');
+  const out = { ok: 0, failed: 0 };
+  for (const g of groups) {
+    if (!/^(dm|space)\/[\w-]+$/.test(g) || !wc || wc.isDestroyed()) {
+      out.failed++;
+      continue;
+    }
+    const res = await wc.executeJavaScript(`window.__gslack?.markRead(${JSON.stringify(g)})`).catch(() => 'error');
+    if (DEV) console.log('[feed] mark read', g, res);
+    if (res === 'ok' || res === 'already-read') out.ok++;
+    else out.failed++;
+  }
+  return out;
+}
+
+ipcMain.handle('feed:dismiss', async (e, target) => {
+  if (!fromLocal(e)) return { error: 'Not allowed' };
+  let groups;
+  if (target === 'all') {
+    // Everything the Messages card shows: feed + other unread conversations.
+    groups = [...feed.clear().map((it) => it.group), ...state.chat.conversations.map((c) => c.id)];
+  } else if (typeof target === 'string' && /^(dm|space)\//.test(target)) {
+    feed.dismissGroup(target);
+    groups = [target];
+  } else {
+    groups = feed.dismiss(String(target)).map((it) => it.group);
+  }
+  pushState();
+  const res = await markRead([...new Set(groups.filter(Boolean))]);
+  return { ok: true, ...res };
+});
+
+ipcMain.on('feed:open', (e, id) => {
+  if (!fromLocal(e) || !views) return;
+  const it = feed.get(String(id));
+  if (!it) return;
+  feed.dismiss(it.id);
+  pushState();
+  showWindow();
+  if (it.group) {
+    views.show('chat');
+    views.webContents('chat')?.executeJavaScript(`window.__gslack?.openGroup(${JSON.stringify(it.group)})`).catch(() => {});
+  } else if (it.noteId?.startsWith('sw')) {
+    openNotification(it.noteId);
+  } else {
+    // Page notification: the page opens the conversation (for 5 min).
+    views.show(it.source);
+    if (it.noteId) views.webContents(it.source)?.send('gslack:chip-click', it.noteId);
+  }
+});
+
+// --- work item hub ---------------------------------------------------------------
+// One page per issue key (panels/item.html): Jira ticket, pull requests with
+// CI, Chat mentions, mail, meetings. Opened from Home, Reviews, ⌘J, or a
+// Jira link clicked in Chat / Gmail.
+
+const mentions = workitem.createMentions(); // Chat messages naming a key, memory only
+let recentMail = []; // unread inbox + important entries (Atom feed)
+const hubCache = new Map(); // key → { at, promise }
+// What the hub showed, so its actions (approve, move, hand-off) are allowed
+// on tickets and PRs outside the regular lists.
+const hubIssues = new Map(); // key → issue
+const hubPRs = new Map(); // "repo#number" → PR
+
+const remember = (map, id, value) => {
+  map.delete(id);
+  map.set(id, value);
+  if (map.size > 200) map.delete(map.keys().next().value);
+};
+
+function openItem(key) {
+  if (!keys.isKey(key) || !views) return;
+  showWindow();
+  views.show('item');
+  views.sendWhenLoaded('item', 'item:open', key);
+}
+
+// Organisations the user works in: search for teammates' PRs there only.
+const ghOwners = () => [...new Set([...(state.github.mine || []), ...(state.github.reviews || []), ...(state.github.merged || [])]
+  .map((p) => p.repo.split('/')[0]))];
+
+function loadItem(key, force = false) {
+  const hit = hubCache.get(key);
+  if (!force && hit && Date.now() - hit.at < workitem.CACHE_MS) return hit.promise;
+  const hidden = github.toMatcher(settings.get('githubExclude') || []);
+  const jiraOn = !!jiraService;
+  const promise = workitem.load(key, {
+    jira: jiraOn ? { status: state.jira.status, issue: jiraService.issue, transitions: jiraService.transitions } : { status: state.jira.status },
+    github: {
+      status: state.github.status === 'disabled' ? 'disabled' : state.github.status,
+      search: (k) => github.searchByKey(k, ghOwners(), (n) => keys.keysIn(n.title, n.headRefName, n.body).includes(k)),
+    },
+    localPRs: [...(state.github.mine || []), ...(state.github.reviews || []), ...(state.github.merged || [])],
+    mentions,
+    mail: recentMail,
+    meetings: state.calendar.today,
+  }).then((data) => {
+    if (data.jira.issue) remember(hubIssues, key, data.jira.issue);
+    data.github.prs = data.github.prs.filter((p) => !hidden(p.repo) || p.mine);
+    for (const p of data.github.prs) remember(hubPRs, `${p.repo}#${p.number}`, p);
+    return data;
+  });
+  hubCache.set(key, { at: Date.now(), promise });
+  promise.catch(() => hubCache.delete(key));
+  return promise;
+}
+
+ipcMain.handle('item:load', async (e, key, { force = false } = {}) => {
+  if (!fromLocal(e) || !keys.isKey(key)) return { error: 'Invalid issue key' };
+  try {
+    return await loadItem(key, !!force);
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+ipcMain.on('item:open', (e, key) => fromLocal(e) && openItem(key));
 
 // --- standup -------------------------------------------------------------------
 
@@ -444,13 +714,70 @@ ipcMain.on('gslack:theme', (e, on) => {
   if (fromView(e, 'chat')) views.setFonts(!!on, e.sender);
 });
 ipcMain.on('gslack:open-external', (_e, url) => safeOpen(url));
+
+// A Google view created a notification (notify.js). Decide now: nothing if
+// you're looking at that view, a chip if Workrail is in front, else a
+// native notification. Clicks go back to the page (it opens the
+// conversation).
+ipcMain.on('gslack:chip', (e, chip) => {
+  const source = views?.nameOf(e.sender);
+  if (!source || !chip) return;
+  const str = (v, n) => String(v || '').slice(0, n);
+  const note = {
+    id: str(chip.id, 40), source,
+    title: str(chip.title, 200), body: str(chip.body, 600),
+    icon: /^https:\/\//.test(chip.icon || '') ? str(chip.icon, 1000) : '',
+  };
+  if (source === 'chat') addToFeed({ ...note, group: groupOf(`${str(chip.tag, 300)} ${str(chip.data, 4000)}`), noteId: note.id });
+  const front = win && win.isVisible() && !win.isMinimized() && win.isFocused();
+  if (DEV) {
+    console.log('[page-notification]', JSON.stringify({ source, title: note.title, body: note.body.slice(0, 80), rawKeys: Object.keys(chip),
+      front, visible: win?.isVisible(), focused: win?.isFocused(), active: views.active(), chips: settings.get('messageChips') }));
+  }
+  if (source === 'chat') mentions.add({ title: note.title, body: note.body, source });
+  if (front && views.active() === source) return;
+  if (front && settings.get('messageChips')) return views.showChip(note);
+  showNative(note.title, note.body, () => {
+    showWindow();
+    views?.show(source);
+    views?.webContents(source)?.send('gslack:chip-click', note.id);
+  });
+});
+
+function showNative(title, body, onClick) {
+  // Silent: the page already played its own sound.
+  const n = new Notification({ title: title || 'Workrail', body, silent: true });
+  keepAlive.add(n);
+  n.on('click', onClick);
+  n.on('close', () => keepAlive.delete(n));
+  n.show();
+  if (!win?.isFocused()) platform.requestAttention(win);
+}
+ipcMain.on('gslack:visibility-request', () => updateVisibility());
+ipcMain.on('chips:size', (e, h) => {
+  if (DEV) console.log('[chips] size', h);
+  if (views?.isOverlay(e.sender)) views.setOverlayHeight(h);
+});
+ipcMain.on('chips:open', (e, { source, id } = {}) => {
+  if (!views?.isOverlay(e.sender) || !VIEWS[source]) return;
+  if (String(id).startsWith('sw')) return openNotification(String(id));
+  views.show(source);
+  views.webContents(source)?.send('gslack:chip-click', String(id));
+});
 // Unread conversations published by inject/app.js (for Home).
 const CONV_KINDS = ['dm', 'group', 'space', 'meeting'];
 ipcMain.on('gslack:conversations', (e, list) => {
   if (!fromView(e, 'chat') || !Array.isArray(list)) return;
   state.chat.conversations = list.slice(0, 100)
     .filter((c) => c && typeof c.id === 'string' && /^(dm|space)\/[\w-]+$/.test(c.id) && CONV_KINDS.includes(c.kind))
-    .map((c) => ({ id: c.id, name: String(c.name || '').slice(0, 120), kind: c.kind, notifications: Math.max(0, Number(c.notifications) || 0) }));
+    .map((c) => ({
+      id: c.id, name: String(c.name || '').slice(0, 120), kind: c.kind, notifications: Math.max(0, Number(c.notifications) || 0),
+      preview: c.preview && typeof c.preview === 'object' ? {
+        sender: String(c.preview.sender || '').slice(0, 80),
+        text: String(c.preview.text || '').slice(0, 300),
+        at: Number.isFinite(c.preview.at) ? c.preview.at : null,
+      } : null,
+    }));
   pushState();
 });
 ipcMain.on('gslack:log', (_e, ...args) => DEV && console.log('[page]', ...args));
@@ -477,6 +804,12 @@ ipcMain.on('shell:action', (e, action) => {
       views.show('chat');
       if (typeof action.id === 'string' && /^(dm|space)\/[\w-]+$/.test(action.id)) {
         views.webContents('chat')?.executeJavaScript(`window.__gslack?.openGroup(${JSON.stringify(action.id)})`).catch(() => {});
+      }
+      return;
+    case 'chat-search':
+      views.show('chat');
+      if (keys.isKey(action.q)) {
+        views.webContents('chat')?.executeJavaScript(`window.__gslack?.search(${JSON.stringify(action.q)})`).catch(() => {});
       }
       return;
     case 'jira': {
@@ -545,6 +878,14 @@ ipcMain.handle('settings:save', (e, patch) => {
   if ('github' in rest || 'githubTeams' in rest || 'githubExclude' in rest) startGithub();
   if ('workdayEnd' in rest) pushState();
   if ('jira' in rest || 'jiraSite' in rest || 'jiraJql' in rest) startJira();
+  if (typeof patch.checkUpdates === 'boolean') {
+    settings.set({ checkUpdates: patch.checkUpdates });
+    updatesService?.refresh();
+  }
+  if (typeof patch.messageChips === 'boolean') {
+    settings.set({ messageChips: patch.messageChips });
+    updateVisibility();
+  }
   return settings.publicView();
 });
 
@@ -559,7 +900,9 @@ async function confirm(message, detail, button) {
 }
 
 const findPR = (repo, number) => [...(state.github.mine || []), ...(state.github.reviews || [])]
-  .find((p) => p.repo === repo && p.number === number);
+  .find((p) => p.repo === repo && p.number === number) || hubPRs.get(`${repo}#${number}`) || null;
+const findIssue = (key) => (state.jira.issues || []).find((i) => i.key === key) || hubIssues.get(key) || null;
+const forgetItems = () => hubCache.clear();
 
 ipcMain.handle('gh:action', async (e, a) => {
   if (!fromLocal(e) || !a) return { error: 'Not allowed' };
@@ -586,18 +929,20 @@ ipcMain.handle('gh:action', async (e, a) => {
     return { error: err.message };
   }
   githubService?.refresh();
+  forgetItems();
   return { ok: true };
 });
 
 ipcMain.handle('jira:transition', async (e, { key, id } = {}) => {
   if (!fromLocal(e) || !jiraService) return { error: 'Not allowed' };
-  const issue = (state.jira.issues || []).find((i) => i.key === key);
+  const issue = findIssue(key);
   const all = await jiraService.transitions(key).catch(() => []);
   const t = all.find((x) => String(x.id) === String(id));
   if (!issue || !t) return { error: 'Transition not available anymore (refresh and retry)' };
   if (!(await confirm(`Move ${key} to ${t.to}?`, `${issue.summary}\n\nCurrently: ${issue.status}`, 'Move'))) return { cancelled: true };
   try {
     await jiraService.transition(key, t.id);
+    forgetItems();
     return { ok: true };
   } catch (err) {
     return { error: err.message };
@@ -670,9 +1015,9 @@ async function fixCiPrompt(pr) {
 }
 
 async function implementPrompt(key) {
-  const issue = (state.jira.issues || []).find((i) => i.key === key);
+  const issue = findIssue(key);
   const info = await jiraService.description(key).catch(() => ({ summary: issue?.summary || '', description: '' }));
-  const slug = `${key.toLowerCase()}-${(info.summary || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)}`;
+  const slug = keys.branchSlug(key, info.summary);
   return [
     `Implement Jira ticket ${key}: ${info.summary}`,
     issue?.url ? `Ticket: ${issue.url}` : '',
@@ -684,7 +1029,7 @@ async function implementPrompt(key) {
 
 // Repo of a ticket: the one of a PR (open or merged) referencing it.
 function repoForTicket(key) {
-  const pr = [...(state.github.mine || []), ...(state.github.merged || [])].find((p) => keys.prKeys(p).includes(key));
+  const pr = [...(state.github.mine || []), ...(state.github.merged || []), ...hubPRs.values()].find((p) => keys.prKeys(p).includes(key));
   return pr?.repo || null;
 }
 
@@ -718,7 +1063,7 @@ ipcMain.handle('agent:handoff', async (e, req = {}) => {
       const gh = await github.resolveGh();
       if (gh) pre.push([gh, 'pr', 'checkout', String(pr.number)]);
     } else if (req.kind === 'implement') {
-      if (!state.jira.issues?.some((i) => i.key === req.key)) return { error: 'Ticket not found' };
+      if (!jiraService || !findIssue(req.key)) return { error: 'Ticket not found' };
       repo = repoForTicket(req.key);
       prompt = await implementPrompt(req.key);
     } else {
@@ -797,6 +1142,15 @@ function buildMenu() {
         { label: 'Calendar', accelerator: 'CmdOrCtrl+4', click: go('calendar') },
         { label: 'Reviews', accelerator: 'CmdOrCtrl+5', click: go('github') },
         { label: 'Jira', accelerator: 'CmdOrCtrl+6', click: go('jira') },
+        {
+          label: 'Go to Work Item…',
+          accelerator: 'CmdOrCtrl+J',
+          click: () => {
+            showWindow();
+            views?.show('item');
+            views?.sendWhenLoaded('item', 'item:focus-search');
+          },
+        },
         { type: 'separator' },
         {
           label: 'Quick Switcher',

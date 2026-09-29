@@ -1,18 +1,9 @@
 // Home: today at a glance. Everything shown comes from the shell state pushed
 // by the main process (priorities.js computes state.home).
-// el, ago, waited, fmtTime: panels/common.js
-const api = window.gslackShell;
-const $ = (id) => document.getElementById(id);
-
-const DAY = 86400000;
+// el, ago, waited, fmtTime: panels/common.js; act, row, chip…: panels/ui.js
 const MAX_ROWS = 6;
 const FOCUS_ROWS = 5;
-const PRIMARY = new Set(['Join', 'Merge']);
 const MINE_ORDER = ['ready', 'ci-failed', 'changes', 'conflict', 'ci-pending', 'waiting', 'draft'];
-const MINE_LABEL = {
-  ready: 'Ready', 'ci-failed': 'CI failed', changes: 'Changes', conflict: 'Conflict',
-  'ci-pending': 'CI running', waiting: 'In review', draft: 'Draft',
-};
 const TO_FIX = new Set(['ci-failed', 'changes', 'conflict']);
 // Jira keys in PR titles ("[PROJ-123]") link PRs and tickets.
 const KEY_RE = /\b[A-Z][A-Z0-9]+-\d+\b/g;
@@ -21,75 +12,10 @@ const PRIORITY_RANK = { highest: 0, blocker: 0, critical: 0, high: 1, medium: 2,
 let focusExpanded = false;
 let lastState = null;
 
-let agentName = null; // chosen AI agent (Settings), null = none installed
 const openDetails = new Set(); // "repo#number" of PRs with CI details open
-const ciCache = new Map(); // runId → failed log excerpt
 
-// Actions that change something go through main (native confirmation) and
-// report back here.
-async function act(action) {
-  if (action.type === 'gh') {
-    return report(await api.ghAction(action), { merge: 'Merged', approve: 'Approved', rerun: 'Re-run started' }[action.kind]);
-  }
-  if (action.type === 'jira-move') return report(await api.jiraTransition(action.key, action.id), 'Ticket moved');
-  if (action.type === 'handoff') {
-    toast(`Starting ${agentName || 'the agent'}…`);
-    return report(await api.handoff(action), (res) => `${res.agent} opened in a terminal`);
-  }
-  return api.action(action);
-}
-
-function report(res, okText) {
-  if (!res || res.cancelled) return;
-  if (res.error) toast(res.error, 'error');
-  else toast(typeof okText === 'function' ? okText(res) : okText, 'ok');
-}
-
-let toastTimer = null;
-function toast(text, kind = '') {
-  let box = document.getElementById('toast');
-  if (!box) {
-    box = el('div', { id: 'toast', role: 'status' });
-    document.body.append(box);
-  }
-  box.className = `toast show ${kind}`;
-  box.textContent = text;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => box.classList.remove('show'), kind === 'error' ? 7000 : 3500);
-}
 const daysSince = (ts) => Math.floor((Date.now() - new Date(ts).getTime()) / DAY);
 const isRecent = (ts) => daysSince(ts) < 30;
-
-// --- icons (same stroke style as the rail) --------------------------------------------
-
-const SVG_NS = 'http://www.w3.org/2000/svg';
-const ICONS = {
-  meeting: [['rect', { x: 4, y: 5.5, width: 16, height: 14.5, rx: 1.5 }], ['path', { d: 'M4 10h16M8.5 3.5v4M15.5 3.5v4' }]],
-  chat: [['path', { d: 'M5 4.5h14A1.5 1.5 0 0 1 20.5 6v9.5A1.5 1.5 0 0 1 19 17H9.5l-5 4V6A1.5 1.5 0 0 1 5 4.5z' }]],
-  group: [['circle', { cx: 9, cy: 9, r: 3 }], ['path', { d: 'M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5' }], ['circle', { cx: 16.5, cy: 9.5, r: 2.5 }], ['path', { d: 'M16 14.2c2.6.3 4.5 2.1 4.5 4.8' }]],
-  pr: [['circle', { cx: 6.5, cy: 6, r: 2 }], ['circle', { cx: 6.5, cy: 18, r: 2 }], ['circle', { cx: 17.5, cy: 18, r: 2 }], ['path', { d: 'M6.5 8v8M17.5 16V9.5a3 3 0 0 0-3-3H11M13 4l-2.5 2.5L13 9' }]],
-  review: [['path', { d: 'M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z' }], ['circle', { cx: 12, cy: 12, r: 3 }]],
-  mail: [['rect', { x: 3.5, y: 5.5, width: 17, height: 13, rx: 1.5 }], ['path', { d: 'M4 7l8 6 8-6' }]],
-  free: [['circle', { cx: 12, cy: 12, r: 8.5 }], ['path', { d: 'M12 7.5V12l3 2' }]],
-  ticket: [['path', { d: 'M4 7.5A1.5 1.5 0 0 1 5.5 6h13A1.5 1.5 0 0 1 20 7.5v2a2.5 2.5 0 0 0 0 5v2a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 16.5v-2a2.5 2.5 0 0 0 0-5z' }], ['path', { d: 'M14.5 7.5v1.5M14.5 11.25v1.5M14.5 15v1.5' }]],
-};
-
-function svgIcon(name) {
-  const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('aria-hidden', 'true');
-  for (const [tag, attrs] of ICONS[name] || []) {
-    const node = document.createElementNS(SVG_NS, tag);
-    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
-    svg.append(node);
-  }
-  return svg;
-}
-
-// kind drives the tint (meeting/chat/pr/review/mail); name the drawing.
-function ico(kind, name = kind, small = false) {
-  return el('span', { class: `ico ${kind}${small ? ' sm' : ''}` }, svgIcon(name));
-}
 
 // --- small builders -----------------------------------------------------------------
 
@@ -99,44 +25,8 @@ function section(id, count, children) {
   card.querySelector('.body').replaceChildren(...children.flat(Infinity).filter(Boolean));
 }
 
-const note = (...parts) => el('div', { class: 'note' }, ...parts);
-
-function linkBtn(text, onClick, cls = '') {
-  const b = el('button', { class: `link-btn ${cls}`, type: 'button', text });
-  b.addEventListener('click', (e) => {
-    e.stopPropagation();
-    onClick();
-  });
-  return b;
-}
-
-function button(text, onClick, primary = PRIMARY.has(text), small = false) {
-  const b = el('button', { class: `btn${primary ? ' primary' : ''}${small ? ' small' : ''}`, type: 'button', text });
-  b.addEventListener('click', (e) => {
-    e.stopPropagation();
-    onClick();
-  });
-  return b;
-}
-
-function row({ lead, title, sub, trail = [], onClick, tooltip, cls = '' }) {
-  const r = el('div', { class: `row ${cls}`, role: 'link', tabindex: '0', title: tooltip },
-    lead,
-    el('div', { class: 'row-main' },
-      el('div', { class: 'row-title', text: title }),
-      sub ? el('div', { class: 'row-sub', text: sub }) : null),
-    ...trail);
-  if (onClick) {
-    r.addEventListener('click', onClick);
-    r.addEventListener('keydown', (e) => e.key === 'Enter' && onClick());
-  }
-  return r;
-}
-
-const chip = (text, level = '') => el('span', { class: `chip ${level}`, text });
 const scrollTo = (id) => $(id).scrollIntoView({ behavior: 'smooth', block: 'start' });
 const waitLevel = (days) => (days > 5 ? 'urgent' : days > 2 ? 'high' : '');
-const todayStr = () => new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD, local
 const keysIn = (text) => [...new Set(text.match(KEY_RE) || [])];
 // Keys of a PR: from its title, plus its branch ("feat/proj-123-…") when the
 // key is one of my tickets (branches are often lower-case).
@@ -144,40 +34,6 @@ function prKeys(p, state = lastState) {
   const known = new Set((state?.jira?.issues || []).map((i) => i.key));
   const fromBranch = (String(p.branch || '').match(/[A-Za-z][A-Za-z0-9_]+-\d+/g) || []).map((k) => k.toUpperCase()).filter((k) => known.has(k));
   return [...new Set([...keysIn(p.title || ''), ...fromBranch])];
-}
-
-// "⚡ Review" etc.: hand the work to the AI agent chosen in Settings.
-function agentBtn(label, req) {
-  if (!agentName) return null;
-  const b = button(`⚡ ${label}`, () => act({ type: 'handoff', ...req }), false, true);
-  b.title = `Open ${agentName} in a terminal on this`;
-  b.classList.add('agent');
-  return b;
-}
-const smallBtn = (text, onClick, primary = false) => button(text, onClick, primary, true);
-const jiraSite = (state) => state.jira?.site || null;
-
-function keyChip(state, key) {
-  const issue = (state.jira?.issues || []).find((i) => i.key === key);
-  const site = jiraSite(state);
-  if (!issue && !site) return null; // Jira not set up: no link to offer
-  const b = el('button', { class: 'key-chip', type: 'button', text: issue ? `${key} · ${issue.status}` : key, title: issue?.summary || `Open ${key} in Jira` });
-  b.addEventListener('click', (e) => {
-    e.stopPropagation();
-    act({ type: 'jira', url: issue?.url || `https://${site}/browse/${key}` });
-  });
-  return b;
-}
-
-// Due-date chip: overdue red, today orange, this week grey.
-function dueChip(due) {
-  if (!due) return null;
-  const today = todayStr();
-  if (due < today) return chip(`Overdue ${Math.round((new Date(today) - new Date(due)) / DAY)} d`, 'urgent');
-  if (due === today) return chip('Due today', 'high');
-  const days = Math.round((new Date(due) - new Date(today)) / DAY);
-  if (days <= 6) return chip(`Due ${new Date(`${due}T12:00`).toLocaleDateString([], { weekday: 'short' })}`);
-  return chip(`Due ${new Date(`${due}T12:00`).toLocaleDateString([], { day: 'numeric', month: 'short' })}`);
 }
 
 function duration(ms) {
@@ -401,28 +257,6 @@ function ticketSort(a, b) {
     || new Date(b.updated) - new Date(a.updated);
 }
 
-// Jira-style status lozenge: colour from the status name, else its category.
-function statusClass(t) {
-  const name = t.status.toLowerCase();
-  if (t.category === 'done') return 'done';
-  if (/block|impediment|on hold|waiting/.test(name)) return 'blocked';
-  if (/review/.test(name)) return 'review';
-  if (/test|qa|valid|recette|uat|verif/.test(name)) return 'qa';
-  return t.category === 'indeterminate' ? 'progress' : 'new';
-}
-
-const lozenge = (t) => el('span', { class: `lozenge ${statusClass(t)}`, text: t.status, title: `Status: ${t.status}` });
-
-// Linked PR as a pill coloured by its state; opens the PR.
-function prPill(p) {
-  const b = el('button', { class: `pill small ${p.status}`, type: 'button', text: `#${p.number} ${MINE_LABEL[p.status] || ''}`.trim(), title: `${p.repo}#${p.number} · ${p.title}` });
-  b.addEventListener('click', (e) => {
-    e.stopPropagation();
-    act({ type: 'pr', url: p.url });
-  });
-  return b;
-}
-
 function ticketRow(state, t) {
   // My open PRs mentioning this ticket.
   const prs = (state.github?.mine || []).filter((p) => prKeys(p, state).includes(t.key));
@@ -444,7 +278,7 @@ function ticketRow(state, t) {
       agentBtn('Implement', { kind: 'implement', key: t.key }),
     ],
     tooltip: `${t.key} · ${t.type}${t.priority ? ` · ${t.priority}` : ''}`,
-    onClick: () => act({ type: 'jira', url: t.url }),
+    onClick: (e) => act({ type: 'jira', url: t.url, raw: !!e?.shiftKey }),
   });
 }
 
@@ -479,10 +313,12 @@ function renderTickets(state) {
 
 // --- GitHub sections ------------------------------------------------------------------------
 
+const GH_INSTALL = { darwin: 'brew install gh', win32: 'winget install GitHub.cli', linux: 'sudo apt install gh' };
+
 function githubNote(gh) {
   if (gh.status === 'loading') return note('Loading…');
   if (gh.status === 'disabled') return note('Reviews are off. ', linkBtn('Turn them on in Settings', () => api.select('settings')), '.');
-  if (gh.status === 'no-gh') return note('GitHub CLI not found: install it with ', el('code', { text: 'brew install gh' }), ', then run ', el('code', { text: 'gh auth login' }), '.');
+  if (gh.status === 'no-gh') return note('GitHub CLI not found: install it with ', el('code', { text: GH_INSTALL[api.platform] || GH_INSTALL.linux }), ', then run ', el('code', { text: 'gh auth login' }), '.');
   if (gh.status === 'auth') return note('Not signed in to GitHub: run ', el('code', { text: 'gh auth login' }), ' in a terminal.');
   return note(`Could not load GitHub: ${gh.error || 'unknown error'}`);
 }
@@ -544,42 +380,6 @@ function mineRow(p) {
     onClick: () => act({ type: 'pr', url: p.url }),
   });
   return failing && openDetails.has(id) ? [r, ciDetails(p)] : [r];
-}
-
-// Why CI fails: GitHub Actions jobs show their error lines (+ log) and can be
-// re-run; other checks (SonarQube…) only link out.
-function ciDetails(p) {
-  const box = el('div', { class: 'ci-details' });
-  for (const c of p.failed || []) {
-    const head = el('div', { class: 'ci-check' },
-      el('span', { class: 'ci-name', text: `✗ ${c.name}` }),
-      c.runId ? smallBtn('Re-run failed', () => act({ type: 'gh', kind: 'rerun', repo: p.repo, number: p.number, runId: c.runId })) : null,
-      c.url ? linkBtn('Open', () => act({ type: 'pr', url: c.url })) : null);
-    box.append(head);
-    if (!c.runId) {
-      box.append(el('div', { class: 'ci-note', text: 'External check: details on its own page.' }));
-      continue;
-    }
-    const body = el('div', { class: 'ci-body', text: 'Loading the failure…' });
-    box.append(body);
-    const show = (d) => {
-      if (!d || d.error) return body.replaceChildren(document.createTextNode(`Could not read the log: ${d?.error || 'unknown error'}`));
-      if (d.expired) return body.replaceChildren(document.createTextNode('Logs are no longer available for this run.'));
-      body.replaceChildren(...[
-        d.errors.length ? el('ul', { class: 'ci-errors' }, ...d.errors.map((x) => el('li', { text: x }))) : null,
-        d.text ? el('details', {}, el('summary', { text: `Log (${d.job})` }), el('pre', { text: d.text })) : null,
-      ].filter(Boolean));
-    };
-    if (ciCache.has(c.runId)) show(ciCache.get(c.runId));
-    else {
-      api.ciDetails(p.repo, c.runId).then((d) => {
-        ciCache.set(c.runId, d);
-        show(d);
-      });
-    }
-  }
-  if (!(p.failed || []).length) box.append(el('div', { class: 'ci-note', text: 'No failing check details reported.' }));
-  return box;
 }
 
 function renderMine(state) {
@@ -655,31 +455,134 @@ function renderToday(state) {
 
 const CHAT_ORDER = { dm: 0, group: 1, space: 2, meeting: 3 };
 
+// Messages: the latest notified Chat messages, one row per conversation
+// (feed.js in main), then the other unread conversations from Chat's
+// sidebar. ✕ / Clear all mark them read in Chat.
+const MSG_LINES = 3;
+const dismissing = new Set(); // conversation ids hidden until Chat confirms
+
+function convLead(c, icon) {
+  const fallback = () => (c?.kind === 'space'
+    ? el('span', { class: 'ico sm hash', text: '#' })
+    : ico(c?.kind === 'meeting' ? 'meeting' : 'chat', c ? convKind(c) : 'chat', true));
+  if (!icon) return fallback();
+  const img = el('img', { class: 'avatar sm', src: icon, alt: '' });
+  img.addEventListener('error', () => img.replaceWith(fallback()));
+  return img;
+}
+
+function dismissBtn(label, target) {
+  const b = el('button', { class: 'dismiss', type: 'button', title: `${label} (marks it read in Chat)`, 'aria-label': label, text: '✕' });
+  b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    b.closest('.msg')?.classList.add('gone');
+    if (/^(dm|space)\//.test(target)) dismissing.add(target);
+    const res = await api.feedDismiss(target);
+    if (res?.failed) toast('Removed here, but Chat could not mark it read: open it in Chat', 'error');
+  });
+  return b;
+}
+
+function messageRow(state, items) {
+  const latest = items[0];
+  const conv = (state.chat?.conversations || []).find((c) => c.id === latest.group);
+  const name = conv?.name || latest.title || 'Chat';
+  // "Alertbot (Ops Alerts)" in the Ops Alerts row → "Alertbot".
+  const senderOf = (m) => (m.title.endsWith(`(${name})`) ? m.title.slice(0, -name.length - 2).trim() : m.title);
+  const lines = items.slice(0, MSG_LINES).map((m) => el('div', { class: 'msg-line' },
+    m.title && m.title !== name ? el('strong', { text: `${senderOf(m)}: ` }) : null,
+    document.createTextNode(m.body || '(no text)')));
+  const r = el('div', { class: 'row msg', role: 'link', tabindex: '0', title: items.map((m) => `${m.title}: ${m.body}`).join('\n') },
+    convLead(conv, latest.icon),
+    el('div', { class: 'row-main' },
+      el('div', { class: 'row-title', text: name }),
+      ...lines,
+      items.length > MSG_LINES ? el('div', { class: 'msg-more', text: `+ ${items.length - MSG_LINES} earlier` }) : null),
+    el('span', { class: 'side', text: ago(latest.at) }),
+    items.length > 1 ? chip(String(items.length), 'urgent') : null,
+    dismissBtn('Dismiss', latest.group || latest.id));
+  const open = () => api.feedOpen(latest.id);
+  r.addEventListener('click', open);
+  r.addEventListener('keydown', (e) => e.key === 'Enter' && open());
+  return r;
+}
+
+// Unread conversation with its last message (read from Chat's Home page).
+function previewRow(c) {
+  const p = c.preview;
+  const r = el('div', { class: 'row msg', role: 'link', tabindex: '0', title: `${p.sender ? `${p.sender}: ` : ''}${p.text}` },
+    convLead(c),
+    el('div', { class: 'row-main' },
+      el('div', { class: 'row-title', text: c.name }),
+      el('div', { class: 'msg-line' }, p.sender ? el('strong', { text: `${p.sender}: ` }) : null, document.createTextNode(p.text))),
+    p.at ? el('span', { class: 'side', text: ago(p.at) }) : null,
+    c.notifications ? chip(`${c.notifications}`, 'urgent') : null,
+    dismissBtn('Mark read', c.id));
+  const open = () => act({ type: 'chat', id: c.id });
+  r.addEventListener('click', open);
+  r.addEventListener('keydown', (e) => e.key === 'Enter' && open());
+  return r;
+}
+
 function renderChat(state) {
-  const convs = [...(state.chat?.conversations || [])].sort((a, b) =>
-    (CHAT_ORDER[a.kind] - CHAT_ORDER[b.kind]) || (b.notifications - a.notifications));
+  const convs = state.chat?.conversations || [];
+  const unreadIds = new Set(convs.map((c) => c.id));
+  for (const id of [...dismissing]) if (!unreadIds.has(id)) dismissing.delete(id);
+
+  // Feed grouped by conversation, newest conversation first.
+  const groups = new Map();
+  for (const m of state.chat?.feed || []) {
+    if (m.group && dismissing.has(m.group)) continue;
+    const k = m.group || m.id;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(m);
+  }
+  const feedRows = [...groups.values()].slice(0, MAX_ROWS).map((items) => messageRow(state, items));
+
+  // Unread conversations without a notified message (spaces, muted threads…).
+  const others = convs.filter((c) => !groups.has(c.id) && !dismissing.has(c.id))
+    .sort((a, b) => (CHAT_ORDER[a.kind] - CHAT_ORDER[b.kind]) || (b.notifications - a.notifications)
+      || ((b.preview?.at || 0) - (a.preview?.at || 0)));
   const sub = (c) => ({ dm: 'Direct message', group: 'Group conversation', meeting: 'Meeting chat' }[c.kind]
     || (c.notifications ? 'Mention or followed thread' : 'New messages'));
-  const lead = (c) => (c.kind === 'space'
-    ? el('span', { class: 'ico sm hash', text: '#' })
-    : ico(c.kind === 'meeting' ? 'meeting' : 'chat', convKind(c), true));
-  const rows = convs.slice(0, MAX_ROWS).map((c) => row({
-    lead: lead(c),
-    title: c.name,
-    sub: sub(c),
-    trail: c.notifications ? [chip(`${c.notifications}`, 'urgent')] : c.kind === 'dm' || c.kind === 'group' ? [chip('new', 'urgent')] : [],
-    onClick: () => act({ type: 'chat', id: c.id }),
-  }));
-  const extra = convs.length - rows.length;
-  section('chat', convs.length || '', [
-    rows.length ? rows : note('All caught up.'),
+  const otherRows = others.slice(0, MAX_ROWS).map((c) => {
+    if (c.preview?.text) return previewRow(c);
+    const r = row({
+      lead: convLead(c),
+      title: c.name,
+      sub: sub(c),
+      trail: [c.notifications ? chip(`${c.notifications}`, 'urgent') : null, dismissBtn('Mark read', c.id)],
+      onClick: () => act({ type: 'chat', id: c.id }),
+    });
+    r.classList.add('msg');
+    return r;
+  });
+
+  const total = groups.size + others.length;
+  $('clear-all').hidden = !total;
+  const extra = others.length - otherRows.length;
+  section('chat', total || '', [
+    feedRows,
+    feedRows.length && otherRows.length ? el('div', { class: 'group-label', text: 'Other unread' }) : null,
+    otherRows,
+    total ? null : note('All caught up.'),
     extra > 0 ? linkBtn(`${extra} more →`, () => api.select('chat'), 'footer-link') : null,
   ]);
 }
 
+$('clear-all').addEventListener('click', async () => {
+  for (const c of lastState?.chat?.conversations || []) dismissing.add(c.id);
+  $('chat').querySelectorAll('.msg').forEach((n) => n.classList.add('gone'));
+  const res = await api.feedDismiss('all');
+  if (res?.failed) toast(`${res.failed} conversation${res.failed > 1 ? 's' : ''} could not be marked read in Chat`, 'error');
+  else if (res?.ok) toast('All marked read', 'ok');
+});
+
 function renderMail(state) {
   const g = state.gmail || {};
   if (g.status === 'loading') return section('mail', '', [note('Loading…')]);
+  if (g.status === 'auth') return section('mail', '', [note('Not signed in to Gmail. ', linkBtn('Open Mail', () => api.select('gmail')), '.')]);
+  if (g.status === 'error') return section('mail', '', [note('Mail could not be loaded (offline?). ', linkBtn('Retry', () => api.refresh('gmail')))]);
   if (g.important === null) return section('mail', '', [note('Important mail is not available for this account.')]);
   const mails = [...g.important].sort((a, b) => b.at - a.at);
   const rows = mails.slice(0, MAX_ROWS).map((m) => row({

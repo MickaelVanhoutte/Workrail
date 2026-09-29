@@ -16,5 +16,20 @@ contextBridge.exposeInMainWorld('gslack', {
     ipcRenderer.on('gslack:next-meeting', listener);
     return () => ipcRenderer.removeListener('gslack:next-meeting', listener);
   },
+  // Whether this view is really looked at, and how its notifications should
+  // surface: { hidden: boolean, mode: 'native' | 'chip' }
+  onVisibility: (cb) => {
+    const listener = (_e, v) => cb(v);
+    ipcRenderer.on('gslack:visibility', listener);
+    return () => ipcRenderer.removeListener('gslack:visibility', listener);
+  },
+  requestVisibility: () => ipcRenderer.send('gslack:visibility-request'),
+  // In-app chip for a notification the page created: { id, title, body, icon, tag, data }
+  showChip: (chip) => ipcRenderer.send('gslack:chip', chip),
+  onChipClick: (cb) => {
+    const listener = (_e, id) => cb(id);
+    ipcRenderer.on('gslack:chip-click', listener);
+    return () => ipcRenderer.removeListener('gslack:chip-click', listener);
+  },
   log: (...args) => ipcRenderer.send('gslack:log', ...args.map(String)),
 });

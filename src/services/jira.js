@@ -11,7 +11,9 @@ const BASE_FIELDS = ['summary', 'status', 'priority', 'duedate', 'updated', 'iss
 
 const seenFile = () => path.join(app.getPath('userData'), 'jira-seen.json');
 
-class AuthError extends Error {}
+class AuthError extends Error {
+  name = 'AuthError';
+}
 
 // The sprint field holds an array of sprints; keep the active (else the
 // latest future) one.
@@ -35,6 +37,63 @@ const toIssue = (base, sprintField) => (i) => ({
   updated: i.fields.updated,
   sprint: sprintField ? pickSprint(i.fields[sprintField]) : null,
 });
+
+const ISSUE_FIELDS = ['created', 'assignee', 'reporter', 'description', 'parent', 'subtasks', 'issuelinks', 'comment'];
+
+// Atlassian Document Format → plain text (descriptions, comments).
+function adfText(doc) {
+  const text = [];
+  const walk = (n) => {
+    if (!n || typeof n !== 'object') return;
+    if (n.type === 'text') text.push(n.text || '');
+    if (n.type === 'hardBreak') text.push('\n');
+    if (n.type === 'mention') text.push(n.attrs?.text || '');
+    if (n.type === 'inlineCard') text.push(n.attrs?.url || '');
+    if (n.type === 'listItem') text.push('• ');
+    (n.content || []).forEach(walk);
+    if (['paragraph', 'heading', 'listItem', 'codeBlock', 'blockquote'].includes(n.type)) text.push('\n');
+  };
+  walk(doc);
+  return text.join('').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+const statusOf = (f) => ({ status: f?.status?.name || '', category: f?.status?.statusCategory?.key || 'new' });
+const person = (u) => (u ? u.displayName || '' : '');
+
+function toFullIssue(i, base, sprintField) {
+  const f = i.fields || {};
+  const links = (f.issuelinks || []).map((l) => {
+    const other = l.outwardIssue || l.inwardIssue;
+    if (!other) return null;
+    return {
+      key: other.key,
+      summary: other.fields?.summary || '',
+      ...statusOf(other.fields),
+      relation: (l.outwardIssue ? l.type?.outward : l.type?.inward) || l.type?.name || 'relates to',
+    };
+  }).filter(Boolean);
+  const comments = (f.comment?.comments || []).slice(-5).map((c) => ({
+    author: person(c.author), at: c.created, text: adfText(c.body).slice(0, 2000),
+  }));
+  // Status changes only, oldest first.
+  const history = (i.changelog?.histories || []).flatMap((h) => (h.items || [])
+    .filter((x) => x.field === 'status')
+    .map((x) => ({ at: h.created, author: person(h.author), from: x.fromString || '', to: x.toString || '' })))
+    .sort((a, b) => new Date(a.at) - new Date(b.at));
+  return {
+    ...toIssue(base, sprintField)(i),
+    created: f.created || null,
+    assignee: person(f.assignee),
+    reporter: person(f.reporter),
+    description: adfText(f.description).slice(0, 20000),
+    parent: f.parent ? { key: f.parent.key, summary: f.parent.fields?.summary || '', ...statusOf(f.parent.fields) } : null,
+    subtasks: (f.subtasks || []).map((t) => ({ key: t.key, summary: t.fields?.summary || '', ...statusOf(t.fields) })),
+    links,
+    comments,
+    commentCount: f.comment?.total ?? comments.length,
+    history,
+  };
+}
 
 function loadSeen() {
   try {
@@ -154,20 +213,26 @@ function start({ ses, site, jql, onUpdate, onOpen }) {
   async function description(key) {
     if (!KEY.test(key)) throw new Error('Invalid issue key');
     const data = await get(`/rest/api/3/issue/${key}?fields=description,summary`);
-    const text = [];
-    const walk = (n) => {
-      if (!n) return;
-      if (n.type === 'text') text.push(n.text);
-      if (n.type === 'hardBreak') text.push('\n');
-      (n.content || []).forEach(walk);
-      if (['paragraph', 'heading', 'listItem', 'codeBlock', 'blockquote'].includes(n.type)) text.push('\n');
-    };
-    walk(data.fields?.description);
-    return { summary: data.fields?.summary || '', description: text.join('').replace(/\n{3,}/g, '\n\n').trim() };
+    return { summary: data.fields?.summary || '', description: adfText(data.fields?.description) };
+  }
+
+  // Everything about one ticket, for the work item hub: details, parent,
+  // subtasks, links, latest comments and status history.
+  async function issue(key) {
+    if (!KEY.test(key)) throw new Error('Invalid issue key');
+    if (sprintField === undefined) {
+      const fields = await get('/rest/api/3/field');
+      sprintField = fields.find((f) => f.schema?.custom === SPRINT_SCHEMA)?.id || null;
+    }
+    const params = new URLSearchParams({
+      fields: [...BASE_FIELDS, ...ISSUE_FIELDS, sprintField].filter(Boolean).join(','),
+      expand: 'changelog',
+    });
+    return toFullIssue(await get(`/rest/api/3/issue/${key}?${params}`), base, sprintField);
   }
 
   poll();
-  return { refresh: poll, stop: () => clearTimeout(timer), transitions, transition, movedSince, description };
+  return { refresh: poll, stop: () => clearTimeout(timer), transitions, transition, movedSince, description, issue };
 }
 
-module.exports = { start, DEFAULT_JQL };
+module.exports = { start, DEFAULT_JQL, adfText, toFullIssue, AuthError };

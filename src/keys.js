@@ -13,6 +13,15 @@ function keysIn(...texts) {
 
 const prKeys = (pr) => keysIn(pr.title, pr.branch);
 
+// A single, already normalised key ("PROJ-123"): what the hub and IPC accept.
+const ISSUE_KEY = /^[A-Z][A-Z0-9_]+-\d+$/;
+const isKey = (k) => typeof k === 'string' && k.length <= 40 && ISSUE_KEY.test(k);
+
+// "PROJ-123" + "Fix the login form" → "proj-123-fix-the-login-form"
+const branchSlug = (key, summary = '') => [key.toLowerCase(), String(summary).toLowerCase()
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40).replace(/-$/, '')].filter(Boolean).join('-');
+
 // Jira "what's next" per ticket, from my open and recently merged PRs:
 //   to-review: ticket not in a review status, an open PR references it
 //   next:      ticket not done, a merged PR references it and no open PR does
@@ -54,4 +63,4 @@ function pickTransition(kind, transitions) {
     || null;
 }
 
-module.exports = { keysIn, prKeys, candidates, pickTransition };
+module.exports = { keysIn, prKeys, isKey, branchSlug, candidates, pickTransition };

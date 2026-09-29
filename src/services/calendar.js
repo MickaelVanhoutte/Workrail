@@ -41,6 +41,8 @@ function parse(ics) {
         start: new Date(inst.start).getTime(),
         end: new Date(inst.end).getTime(),
         meetUrl: JSON.stringify(inst.event).match(MEET_RE)?.[0] || null,
+        // Work item hub: meetings about a ticket name it here or in the title.
+        description: text(inst.event.description).slice(0, 1000),
       });
     }
   }

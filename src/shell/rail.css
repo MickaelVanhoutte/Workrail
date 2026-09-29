@@ -109,3 +109,18 @@ body.no-mac .topstrip {
   -webkit-app-region: drag;
 }
 body.no-mac .rail-drag { height: 44px; }
+
+/* New release available (bottom of the rail) */
+.rail-update {
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: #2bac76;
+  color: #fff;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 900;
+  cursor: pointer;
+}
+.rail-update:hover { filter: brightness(1.1); }
+.rail-update[hidden] { display: none; }

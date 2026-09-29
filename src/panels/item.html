@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://avatars.githubusercontent.com; style-src 'self'; script-src 'self'; font-src 'self'">
+  <title>Work item</title>
+  <link rel="stylesheet" href="../shell/base.css">
+  <link rel="stylesheet" href="panel.css">
+  <link rel="stylesheet" href="ui.css">
+  <link rel="stylesheet" href="item.css">
+</head>
+<body>
+  <div class="topbar"></div>
+  <main class="content" id="scroller">
+    <div class="page">
+      <div class="finder">
+        <button class="btn small" id="back" type="button" title="Previous item" disabled>←</button>
+        <div class="finder-box">
+          <input id="find" type="search" autocomplete="off" spellcheck="false"
+                 placeholder="Go to an issue key (PROJ-123) or search your tickets" aria-label="Go to work item">
+          <div class="finder-results" id="find-results" role="listbox" hidden></div>
+        </div>
+      </div>
+
+      <section id="start">
+        <h1>Work items</h1>
+        <p class="lead">Everything about one ticket in one place: the Jira ticket, pull requests with CI, Chat messages, mail and meetings that mention it.</p>
+        <div class="layout">
+          <section class="card" id="recent">
+            <header><h2>Recently opened</h2></header>
+            <div class="body"></div>
+          </section>
+          <section class="card" id="mine-list">
+            <header><h2>My tickets</h2><span class="count"></span></header>
+            <div class="body"></div>
+          </section>
+        </div>
+      </section>
+
+      <article id="item" hidden>
+        <header class="item-hero">
+          <div class="item-meta-top" id="item-top"></div>
+          <h1 id="item-title"></h1>
+          <div class="item-meta" id="item-meta"></div>
+          <div class="item-actions" id="item-actions"></div>
+        </header>
+        <div class="layout">
+          <div class="main-col">
+            <section class="card" id="prs">
+              <header><h2>Pull requests</h2><span class="count"></span></header>
+              <div class="body"></div>
+            </section>
+            <section class="card" id="desc">
+              <header><h2>Description</h2></header>
+              <div class="body"></div>
+            </section>
+            <section class="card" id="related">
+              <header><h2>Parent, subtasks and links</h2><span class="count"></span></header>
+              <div class="body"></div>
+            </section>
+            <section class="card" id="comments">
+              <header><h2>Latest comments</h2><span class="count"></span></header>
+              <div class="body"></div>
+            </section>
+          </div>
+          <aside class="side-col">
+            <section class="card" id="activity">
+              <header><h2>Activity</h2></header>
+              <div class="body"></div>
+            </section>
+            <section class="card" id="chat">
+              <header><h2>Chat</h2><span class="count"></span></header>
+              <div class="body"></div>
+            </section>
+            <section class="card" id="mail">
+              <header><h2>Mail</h2><span class="count"></span></header>
+              <div class="body"></div>
+            </section>
+            <section class="card" id="meetings">
+              <header><h2>Meetings</h2><span class="count"></span></header>
+              <div class="body"></div>
+            </section>
+          </aside>
+        </div>
+      </article>
+    </div>
+  </main>
+  <script src="common.js"></script>
+  <script src="ui.js"></script>
+  <script src="item.js"></script>
+</body>
+</html>

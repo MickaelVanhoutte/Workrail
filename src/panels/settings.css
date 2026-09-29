@@ -108,3 +108,5 @@ textarea:focus {
 }
 .field .inline-help { font-weight: 400; color: var(--gs-muted); }
 .field .grow { flex: 1; min-width: 160px; }
+
+.check.spaced { margin-top: 18px; }

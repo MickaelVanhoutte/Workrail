@@ -14,6 +14,10 @@ const DEFAULTS = {
   summaryTime: '08:55', // weekday morning summary; 'off' disables it
   workdayEnd: '18:00', // free slots end here
   lastSummaryDate: null,
+  // In-app chip with the message when Workrail is open but you're not on that app.
+  messageChips: true,
+  // Ask GitHub once in a while whether a newer Workrail release is out.
+  checkUpdates: true,
   jira: true,
   jiraSite: '', // e.g. yourcompany.atlassian.net; empty = Jira not set up
   jiraJql: '', // empty = default: my open tickets

@@ -12,9 +12,11 @@ const fmtCount = (n) => (n > 99 ? '99+' : String(n));
 
 function render(state) {
   if (!state) return;
+  renderUpdate(state);
   for (const item of items) {
     const name = item.dataset.view;
-    item.classList.toggle('active', state.active === name);
+    // The work item hub belongs with Jira.
+    item.classList.toggle('active', state.active === name || (name === 'jira' && state.active === 'item'));
     const badge = item.querySelector('.rail-badge');
     if (!badge) continue;
     const value = state.badges?.[name];
@@ -28,6 +30,20 @@ function render(state) {
 for (const item of items) {
   item.addEventListener('click', () => api.select(item.dataset.view));
 }
+
+// A newer release is out (services/updates.js): link to its page.
+const updateBtn = document.getElementById('update');
+let updateUrl = null;
+function renderUpdate(state) {
+  const u = state?.update;
+  updateUrl = u?.url || null;
+  updateBtn.hidden = !u;
+  if (u) {
+    updateBtn.textContent = `v${u.version}`;
+    updateBtn.title = `Workrail ${u.version} is available: open the download page`;
+  }
+}
+updateBtn.addEventListener('click', () => updateUrl && api.openExternal(updateUrl));
 
 api.onState(render);
 api.getState().then(render);

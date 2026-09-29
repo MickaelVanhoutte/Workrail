@@ -62,9 +62,11 @@ function start(ses, onUpdate) {
     try {
       const inbox = await fetchFeed(ses, BASE);
       const important = await fetchImportant();
-      onUpdate({ unread: inbox.unread, latest: inbox.entries.slice(0, 5), important, account: inbox.account });
+      onUpdate({ status: 'ok', unread: inbox.unread, latest: inbox.entries, important, account: inbox.account });
     } catch (err) {
       console.error('[gmail]', err.message);
+      // A redirect (3xx, opaque) means signed out.
+      onUpdate({ status: /status (0|3\d\d|401|403)\b/.test(err.message) ? 'auth' : 'error', error: err.message });
     }
     timer = setTimeout(poll, INTERVAL);
   };

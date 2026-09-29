@@ -1,0 +1,324 @@
+/* Shared by Home and the work item hub: colours, cards, rows, icons, chips,
+ * Jira lozenges, PR pills, CI failure details, toast. */
+
+:root {
+  --urgent: #e01e5a;
+  --high: #e8912d;
+  --normal: #1264a3;
+  --ok: #007a5a;
+  --tint-urgent: #fdecf1;
+  --tint-high: #fdf2e5;
+  --tint-normal: #e8f5fa;
+  --tint-ok: #e3f4ee;
+  --tint-grey: #f1f1f1;
+}
+
+/* --- cards --------------------------------------------------------------------------- */
+
+.card {
+  border: 1px solid var(--gs-border);
+  border-radius: 10px;
+  background: var(--gs-bg);
+  overflow: hidden;
+}
+.card > header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 14px 16px 8px;
+}
+.card h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 900;
+}
+.card .count {
+  color: var(--gs-muted);
+  font-size: 13px;
+}
+.see-all {
+  margin-left: auto;
+  color: var(--gs-link);
+  font-size: 13px;
+  text-decoration: none;
+}
+.see-all:hover { text-decoration: underline; }
+.card .body { padding-bottom: 8px; }
+
+.note {
+  padding: 4px 16px 12px;
+  color: var(--gs-muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.note a,
+.link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--gs-link);
+  font-size: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.note a:hover,
+.link-btn:hover { text-decoration: underline; }
+.footer-link {
+  display: block;
+  padding: 4px 16px 8px;
+  font-size: 13px;
+}
+
+/* --- icons ------------------------------------------------------------------------- */
+
+.ico {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--tint-grey);
+  color: #4a4a4a;
+}
+.ico svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ico.hash {
+  font-size: 16px;
+  font-weight: 900;
+}
+.ico.sm { width: 28px; height: 28px; border-radius: 6px; }
+.ico.sm svg { width: 16px; height: 16px; }
+.ico.meeting { background: var(--tint-ok); color: var(--ok); }
+.ico.chat { background: var(--tint-normal); color: var(--normal); }
+.ico.pr,
+.ico.review { background: #f3eefb; color: #6e3bbf; }
+.ico.mail { background: var(--tint-high); color: #b86b12; }
+.ico.ticket { background: #e9f0fd; color: #0052cc; }
+
+/* --- rows ---------------------------------------------------------------------------- */
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+.row:hover { background: var(--gs-hover); }
+.row-main { flex: 1; min-width: 0; }
+.row-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+.row-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--gs-muted);
+  font-size: 13px;
+}
+.row .avatar {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: var(--gs-border);
+}
+.row .side {
+  flex: none;
+  color: var(--gs-muted);
+  font-size: 12px;
+}
+
+.chip {
+  flex: none;
+  display: inline-block;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: var(--tint-grey);
+  color: var(--gs-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 22px;
+  white-space: nowrap;
+}
+.chip.urgent { background: var(--tint-urgent); color: var(--urgent); }
+.chip.high { background: var(--tint-high); color: #b86b12; }
+.chip.ok { background: var(--tint-ok); color: var(--ok); }
+
+/* --- tickets ---------------------------------------------------------------------------- */
+
+.group-label {
+  padding: 8px 16px 2px;
+  color: var(--gs-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.key-chip {
+  flex: none;
+  padding: 0 7px;
+  border: 1px solid #c9d7f2;
+  border-radius: 4px;
+  background: #f3f7fe;
+  color: #0052cc;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.key-chip:hover { background: #e9f0fd; }
+.prio {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c4c4c4;
+}
+.prio.highest,
+.prio.blocker,
+.prio.critical { background: var(--urgent); }
+.prio.high { background: var(--high); }
+.prio.medium { background: #ecb22e; }
+.prio.low,
+.prio.lowest { background: #7fb8e0; }
+
+/* Jira status lozenges (Jira's own palette), aligned in a column */
+.lozenge {
+  flex: none;
+  min-width: 104px;
+  max-width: 140px;
+  overflow: hidden;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: #dfe1e6;
+  color: #42526e;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.lozenge.progress { background: #deebff; color: #0747a6; }
+.lozenge.review { background: #eae6ff; color: #403294; }
+.lozenge.qa { background: #fff0b3; color: #172b4d; }
+.lozenge.blocked { background: #ffebe6; color: #bf2600; }
+.lozenge.done { background: #e3fcef; color: #006644; }
+
+/* --- PR status pills --------------------------------------------------------------------- */
+
+.pill {
+  flex: none;
+  display: inline-block;
+  min-width: 84px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--tint-grey);
+  color: var(--gs-muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+.pill.ready { background: var(--ok); color: #fff; }
+.pill.ci-failed,
+.pill.conflict { background: var(--urgent); color: #fff; }
+.pill.changes { background: var(--high); color: #fff; }
+.pill.ci-pending { background: #ecb22e; color: #1d1c1d; }
+.pill.small {
+  min-width: 0;
+  border: 0;
+  cursor: pointer;
+}
+.pill.small:hover { filter: brightness(0.95); }
+
+.btn.small {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.row .btn.small { flex: none; }
+.btn.agent {
+  border-color: #d9ccef;
+  background: #f7f3fd;
+  color: #5b2fa6;
+}
+.btn.agent:hover { background: #efe7fb; }
+
+/* CI failure details under a PR row */
+.ci-details {
+  margin: 0 16px 10px 56px;
+  padding: 10px 12px;
+  border: 1px solid #f5c2d0;
+  border-radius: 8px;
+  background: var(--tint-urgent);
+  font-size: 13px;
+}
+.ci-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0;
+}
+.ci-name { flex: 1; font-weight: 700; color: var(--urgent); }
+.ci-note,
+.ci-body { color: var(--gs-muted); margin: 2px 0 6px; }
+.ci-errors {
+  margin: 4px 0;
+  padding-left: 18px;
+  color: var(--gs-text);
+  font-weight: 700;
+}
+.ci-body pre {
+  max-height: 240px;
+  overflow: auto;
+  margin: 6px 0 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: #1d1c1d;
+  color: #e8e8e8;
+  font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+}
+.ci-body summary { cursor: pointer; }
+
+/* --- toast --------------------------------------------------------------------------- */
+
+.toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 10;
+  max-width: 420px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #1d1c1d;
+  color: #fff;
+  font-size: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.15s, transform 0.15s;
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: none; }
+.toast.ok { background: var(--ok); }
+.toast.error { background: var(--urgent); }
+.pill.merged { background: #8250df; color: #fff; }
+.pill.closed { background: #dfe1e6; color: #42526e; }

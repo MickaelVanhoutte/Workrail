@@ -2,10 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://avatars.githubusercontent.com; style-src 'self'; script-src 'self'; font-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://avatars.githubusercontent.com https://*.googleusercontent.com; style-src 'self'; script-src 'self'; font-src 'self'">
   <title>Home</title>
   <link rel="stylesheet" href="../shell/base.css">
   <link rel="stylesheet" href="panel.css">
+  <link rel="stylesheet" href="ui.css">
   <link rel="stylesheet" href="home.css">
 </head>
 <body>
@@ -50,7 +51,7 @@
             <div class="body"></div>
           </section>
           <section class="card" id="chat">
-            <header><h2>Chat</h2><span class="count"></span><a href="#" class="see-all" data-view="chat">Open</a></header>
+            <header><h2>Messages</h2><span class="count"></span><button class="link-btn clear-all" id="clear-all" type="button" hidden>Clear all</button><a href="#" class="see-all" data-view="chat">Chat</a></header>
             <div class="body"></div>
           </section>
           <section class="card" id="mail">
@@ -75,6 +76,7 @@
     </div>
   </div>
   <script src="common.js"></script>
+  <script src="ui.js"></script>
   <script src="home.js"></script>
 </body>
 </html>

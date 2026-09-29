@@ -22,6 +22,8 @@ const VIEWS = {
   // Same session as Google: company SSO often goes through Google.
   jira: { url: () => `https://${settings.get('jiraSite')}/jira/your-work` },
   settings: { file: 'panels/settings.html' },
+  // Work item hub: one issue key at a time (no rail button of its own).
+  item: { file: 'panels/item.html' },
 };
 
 const host = (url) => {
@@ -51,6 +53,15 @@ function routeFor(url) {
   // Atlassian login steps stay in the view doing the login.
   if (['id.atlassian.com', 'auth.atlassian.com'].includes(u.hostname)) return 'self';
   return null;
+}
+
+// "https://<jira site>/browse/PROJ-123" → "PROJ-123" (links opened from
+// Chat or Gmail go to the work item hub instead of the Jira view).
+function jiraKeyOf(url) {
+  const u = host(url);
+  const site = settings.get('jiraSite');
+  if (!u || !site || u.hostname !== site) return null;
+  return u.pathname.match(/^\/browse\/([A-Z][A-Z0-9_]+-\d+)\/?$/)?.[1] || null;
 }
 
 // Signed-out chat.google.com redirects to this marketing page.
@@ -83,7 +94,7 @@ function getFontCss() {
   return fontCss;
 }
 
-function createViews(win, { userAgent, dev, onShow, onReady }) {
+function createViews(win, { userAgent, dev, onShow, onReady, onOpenItem }) {
   const views = new Map(); // name → WebContentsView
   const css = new Map(); // webContents id → { theme, font }
   let active = null;
@@ -148,6 +159,11 @@ function createViews(win, { userAgent, dev, onShow, onReady }) {
 
     wc.setWindowOpenHandler(({ url }) => {
       const route = routeFor(url);
+      const itemKey = name !== 'jira' && onOpenItem ? jiraKeyOf(url) : null;
+      if (itemKey) {
+        onOpenItem(itemKey);
+        return { action: 'deny' };
+      }
       if (route === 'self') {
         wc.loadURL(url);
         return { action: 'deny' };
@@ -175,7 +191,9 @@ function createViews(win, { userAgent, dev, onShow, onReady }) {
         // Real popup of this app: let it be.
         if (route === name && name !== 'chat') return child.show();
         e?.preventDefault?.();
-        if (route && route !== 'self') open(route, url);
+        const itemKey = name !== 'jira' && onOpenItem ? jiraKeyOf(url) : null;
+        if (itemKey) onOpenItem(itemKey);
+        else if (route && route !== 'self') open(route, url);
         else if (route === 'self') return child.show();
         else shell.openExternal(url);
         child.destroy();
@@ -215,6 +233,7 @@ function createViews(win, { userAgent, dev, onShow, onReady }) {
     view.setBackgroundColor('#ffffff');
     views.set(name, view);
     win.contentView.addChildView(view);
+    raiseOverlay();
     const wc = view.webContents;
     if (local) wireLocal(wc);
     else wireGoogle(name, wc);
@@ -244,6 +263,14 @@ function createViews(win, { userAgent, dev, onShow, onReady }) {
     if (wc && !wc.isDestroyed()) wc.send(channel, ...args);
   }
 
+  // Creates the view if needed; a page still loading gets the message once
+  // it is ready (e.g. the hub opened for the first time with a key).
+  function sendWhenLoaded(name, channel, ...args) {
+    const wc = ensure(name).webContents;
+    if (wc.isLoading()) wc.once('did-finish-load', () => send(name, channel, ...args));
+    else send(name, channel, ...args);
+  }
+
   if (dev) {
     let t = null;
     fs.watch(INJECT_DIR, () => {
@@ -252,12 +279,74 @@ function createViews(win, { userAgent, dev, onShow, onReady }) {
     });
   }
 
+  // --- message chips overlay ----------------------------------------------
+  // A transparent local page above every view, bottom-right. Only visible
+  // while chips are showing, so it never swallows clicks otherwise.
+  const CHIPS_W = 400;
+  let overlay = null;
+  let overlayHeight = 0;
+  let overlayReady = false;
+  const pendingChips = []; // chips sent before the page finished loading
+
+  function raiseOverlay() {
+    // Re-adding a child view moves it to the top.
+    if (overlay) win.contentView.addChildView(overlay);
+  }
+
+  function layoutOverlay() {
+    if (!overlay) return;
+    const [width, height] = win.getContentSize();
+    const h = Math.min(overlayHeight, height - 60);
+    overlay.setBounds({ x: Math.max(RAIL_W, width - CHIPS_W), y: height - h, width: Math.min(CHIPS_W, width - RAIL_W), height: h });
+    overlay.setVisible(h > 0);
+  }
+
+  function ensureOverlay() {
+    if (overlay) return overlay;
+    overlay = new WebContentsView({
+      webPreferences: {
+        preload: path.join(__dirname, 'shell/preload.js'),
+        contextIsolation: true, nodeIntegration: false, sandbox: true,
+      },
+    });
+    overlay.setBackgroundColor('#00000000');
+    overlay.setVisible(false);
+    wireLocal(overlay.webContents);
+    overlay.webContents.on('did-finish-load', () => {
+      overlayReady = true;
+      pendingChips.splice(0).forEach((c) => overlay.webContents.send('chips:add', c));
+    });
+    overlay.webContents.loadFile(path.join(__dirname, 'panels/chips.html'));
+    win.contentView.addChildView(overlay);
+    return overlay;
+  }
+
   win.on('resize', layout);
+  win.on('resize', layoutOverlay);
 
   return {
     show,
     open,
+    showChip(chip) {
+      const o = ensureOverlay();
+      raiseOverlay();
+      // A hidden view isn't rendered, so the page can't measure itself: show
+      // the layer at a provisional height, the page then reports the real one.
+      overlayHeight = Math.max(overlayHeight, 120);
+      layoutOverlay();
+      if (overlayReady) o.webContents.send('chips:add', chip);
+      else pendingChips.push(chip);
+      if (dev) console.log('[chips] show', chip.id, 'ready', overlayReady, 'pending', pendingChips.length);
+    },
+    // The chips page reports its height; 0 = nothing to show.
+    setOverlayHeight(h) {
+      overlayHeight = Math.max(0, Math.min(Number(h) || 0, 800));
+      layoutOverlay();
+    },
+    isOverlay: (wc) => overlay?.webContents === wc,
+    googleViews: () => [...views].filter(([n]) => !VIEWS[n].file).map(([n, v]) => [n, v.webContents]),
     send,
+    sendWhenLoaded,
     layout,
     nameOf,
     active: () => active,
@@ -271,4 +360,4 @@ function createViews(win, { userAgent, dev, onShow, onReady }) {
   };
 }
 
-module.exports = { createViews, VIEWS, RAIL_W, isGoogle };
+module.exports = { createViews, VIEWS, RAIL_W, isGoogle, jiraKeyOf };

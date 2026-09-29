@@ -250,6 +250,91 @@ function start({ includeTeams = false, exclude = [], onUpdate }) {
   return { refresh: poll, stop: () => clearTimeout(timer) };
 }
 
+// Pull requests mentioning an issue key (work item hub), anyone's, in the
+// organisations the user works in. Search matches words, so "PROJ-123" also
+// finds "PROJ" + "123": keep only PRs that really carry the key. Two steps:
+// a light search (review / CI fields on 20 PRs take seconds), then details
+// for the open ones only.
+const KEY_SEARCH = `
+query($q: String!) {
+  viewer { login }
+  search(query: $q, type: ISSUE, first: 25) {
+    nodes { ... on PullRequest {
+      id databaseId number title url body state isDraft createdAt updatedAt mergedAt headRefName
+      repository { nameWithOwner }
+      author { login avatarUrl __typename }
+    } }
+  }
+}`;
+const KEY_DETAILS = `
+query($ids: [ID!]!) {
+  nodes(ids: $ids) { ... on PullRequest {
+    id reviewDecision mergeable
+    repository { viewerDefaultMergeMethod }
+    viewerLatestReview { state }
+    reviewRequests(first: 1) { totalCount }
+    commits(last: 1) { nodes { commit { statusCheckRollup { state
+      contexts(first: 30) { nodes { __typename
+        ... on CheckRun { name conclusion detailsUrl }
+        ... on StatusContext { context state targetUrl }
+      } }
+    } } } }
+  } }
+}`;
+
+const OWNER_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/;
+
+function keySearchQuery(key, owners) {
+  const orgs = [...new Set(owners)].filter((o) => OWNER_RE.test(o)).slice(0, 10);
+  return `"${key}" is:pr archived:false ${orgs.length ? orgs.map((o) => `org:${o}`).join(' ') : 'involves:@me'}`;
+}
+
+function toKeyPR(n, viewer) {
+  const open = n.state === 'OPEN';
+  return {
+    ...(open ? toMine(n) : {
+      id: n.databaseId, number: n.number, title: n.title, url: n.url, repo: n.repository.nameWithOwner,
+      branch: n.headRefName || '', failed: [], createdAt: n.createdAt, updatedAt: n.updatedAt,
+    }),
+    state: n.state, // OPEN | MERGED | CLOSED
+    draft: n.isDraft,
+    mergedAt: n.mergedAt || null,
+    author: n.author?.login || 'ghost',
+    avatar: n.author?.avatarUrl || '',
+    bot: isBot(n.author),
+    mine: n.author?.login === viewer,
+    approved: n.viewerLatestReview?.state === 'APPROVED',
+  };
+}
+
+async function searchByKey(key, owners = [], hasKey = () => true) {
+  const gh = await resolveGh();
+  if (!gh) throw Object.assign(new Error('GitHub CLI (gh) not found'), { code: 'no-gh' });
+  const call = async (args) => {
+    try {
+      return JSON.parse(await run(gh, ['api', 'graphql', ...args])).data;
+    } catch (err) {
+      const msg = (err.stderr || err.message || '').trim();
+      throw Object.assign(new Error(msg), { code: /auth|login|401/i.test(msg) ? 'auth' : 'error' });
+    }
+  };
+  const data = await call(['-f', `query=${KEY_SEARCH}`, '-f', `q=${keySearchQuery(key, owners)}`]);
+  const viewer = data.viewer.login;
+  const found = data.search.nodes.filter((n) => n.repository && hasKey(n));
+  const openIds = found.filter((n) => n.state === 'OPEN').map((n) => n.id).slice(0, 15);
+  if (openIds.length) {
+    const args = ['-f', `query=${KEY_DETAILS}`];
+    for (const id of openIds) args.push('-f', `ids[]=${id}`);
+    const details = await call(args);
+    const byId = new Map(details.nodes.filter(Boolean).map((d) => [d.id, d]));
+    for (const n of found) {
+      const d = byId.get(n.id);
+      if (d) Object.assign(n, d, { repository: { ...n.repository, ...d.repository } });
+    }
+  }
+  return found.map((n) => toKeyPR(n, viewer));
+}
+
 // My activity in a time window (standup "yesterday"): PRs opened and
 // reviews submitted. Uses search (the contributions API leaves out orgs with
 // SSO), then keeps what really happened in the window: search dates are per
@@ -288,4 +373,4 @@ async function contributions(from) {
   };
 }
 
-module.exports = { start, mineStatus, resolveGh, run, contributions, toMatcher };
+module.exports = { start, mineStatus, resolveGh, run, contributions, toMatcher, searchByKey, keySearchQuery };

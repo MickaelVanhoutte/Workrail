@@ -15,11 +15,25 @@
     // Screen-reader prefix Chat puts in unread entries.
     unreadText: /^\s*Unread\b/,
     mutedText: /^\s*Muted\b/m,
+    // Chat's own Home page (/app/home): recent conversations with the last
+    // message, a timestamp and a "mark as read" button.
+    homeItems: 'span[role="listitem"][data-group-id][data-is-unread]',
+    homeMarkRead: 'button[data-item="mark-as-read"]',
+    homeTime: '[data-absolute-timestamp]',
+    // Person chips (the sender of the last message).
+    personCard: '[data-hovercard-id]',
+    // Conversation menu (the "⋮" of a sidebar entry, shown on hover) and its
+    // "Mark as read" item (UI language dependent).
+    entryMenuButton: 'button[aria-haspopup="menu"]',
+    menuItem: '[role="menuitem"]',
+    markReadText: /\b(Mark as read|Marquer comme lu)\b/i,
     // Sidebar count pills, e.g. aria-label="3 unread messages".
     badgeLabel: /^\d+ unread message/,
     // Container whose children are [sidebar, divider, main pane].
     panes: '[data-stack-panes]',
     topbar: 'header[role="banner"]',
+    // Chat's own message search box, in the top bar.
+    searchInput: 'header[role="banner"] form[role="search"] input',
     sidePanel: '[role="complementary"]',
     // aria-label "Home shortcut, 15 unread messages" = Chat's own total.
     homeShortcut: '[data-shortcut-type="1"]',
@@ -112,11 +126,105 @@
     location.assign(`/app/chat/${id.split('/')[1]}`);
   }
 
+  // Mark a conversation read without opening it (Home's Messages feed), the
+  // way a user would: the entry's "⋮" menu → "Mark as read". Resolves to
+  // 'ok' | 'already-read' | 'not-found' | 'no-menu' | 'no-item'.
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Chat has one shared conversation menu, filled in for the entry whose
+  // button opened it (it stays in the page, invisible, when closed; and
+  // never finishes its fade-in while the Chat view is hidden). So: wait for
+  // this entry's button to be expanded, then use that menu's item.
+  async function markRead(id) {
+    const node = document.querySelector(`${SEL.entries}[data-group-id="${CSS.escape(id)}"]`);
+    if (!node) return 'not-found';
+    if (!isUnread(node)) return 'already-read';
+    // Chat's Home page shows a direct "mark as read" button: simplest.
+    const direct = homeItems().find((n) => n.dataset.groupId === id)?.querySelector(SEL.homeMarkRead);
+    if (direct) {
+      direct.click();
+      for (let i = 0; i < 10 && isUnread(node); i++) await wait(100);
+      if (!isUnread(node)) return 'ok';
+    }
+    const button = node.querySelector(SEL.entryMenuButton);
+    if (!button) return 'no-menu';
+    button.click();
+    let item = null;
+    for (let i = 0; i < 20 && !item; i++) {
+      await wait(75);
+      if (button.getAttribute('aria-expanded') !== 'true') continue;
+      item = [...document.querySelectorAll(SEL.menuItem)].find((m) => SEL.markReadText.test(m.textContent || ''));
+    }
+    if (!item) {
+      if (button.getAttribute('aria-expanded') === 'true') button.click(); // close it again
+      return 'no-item';
+    }
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
+      item.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    }
+    item.click();
+    for (let i = 0; i < 10 && isUnread(node); i++) await wait(100);
+    if (button.getAttribute('aria-expanded') === 'true') button.click();
+    return isUnread(node) ? 'still-unread' : 'ok';
+  }
+
+  // Run Chat's own message search (work item hub: "Search in Chat").
+  function search(q) {
+    const input = document.querySelector(SEL.searchInput);
+    if (!input) return false;
+    input.focus();
+    // Set the value the way a user would, so Chat's framework sees it.
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, String(q));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    const enter = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true };
+    input.dispatchEvent(new KeyboardEvent('keydown', enter));
+    input.dispatchEvent(new KeyboardEvent('keyup', enter));
+    return true;
+  }
+
+  // Last message of each conversation, read from Chat's Home page while it
+  // is rendered, and remembered while you browse elsewhere in Chat.
+  const previews = new Map(); // group id → { sender, text, at }
+  const homeItems = () => [...document.querySelectorAll(SEL.homeItems)].filter((n) => !n.closest(`[${TAG}="sidebar"]`));
+  // Child-index path from an item to a node, to find the same spot in
+  // items built from the same template.
+  const pathOf = (node, root) => {
+    const path = [];
+    for (let n = node; n && n !== root; n = n.parentElement) path.unshift([...n.parentElement.children].indexOf(n));
+    return path;
+  };
+  const nodeAt = (root, path) => path.reduce((n, i) => n?.children[i] || null, root);
+
+  function readPreviews() {
+    const items = homeItems();
+    const senderOf = (it) => [...it.querySelectorAll(SEL.personCard)]
+      .find((n) => n.dataset.hovercardId !== it.dataset.groupId && (n.innerText || '').trim());
+    // Where the "sender: message" block sits, learnt from an item that has a
+    // person chip; used for items without one (apps, bots).
+    const model = items.find(senderOf);
+    const blockPath = model ? pathOf(senderOf(model).parentElement, model) : null;
+    for (const it of items) {
+      const id = it.dataset.groupId;
+      const time = it.querySelector(SEL.homeTime);
+      const who = senderOf(it);
+      let sender = (who?.innerText || '').trim().replace(/:$/, '');
+      const block = who ? who.parentElement : blockPath && nodeAt(it, blockPath);
+      let text = (block?.innerText || '').replace(/\s+/g, ' ').trim();
+      if (sender && text.startsWith(sender)) text = text.slice(sender.length).replace(/^\s*:\s*/, '');
+      else if (!sender) {
+        const m = text.match(/^([^:]{1,40}):\s+(.+)$/);
+        if (m) [, sender, text] = m;
+      }
+      const at = Number(time?.dataset.absoluteTimestamp || it.dataset.displayTimestamp) || null;
+      if (text) previews.set(id, { sender: sender.slice(0, 80), text: text.slice(0, 300), at });
+    }
+  }
+
   // Unread conversations for Home. Chat's visible screen-reader labels tell
   // the kind ("Conversation" = group DM, "Meeting conversation", "Space") and
   // mentions/followed threads ("2 Notification").
   let lastConversations = '';
   function reportConversations() {
+    readPreviews();
     const list = [];
     for (const e of entries()) {
       if (!e.unread) continue;
@@ -127,7 +235,7 @@
         : /Meeting conversation/.test(text) ? 'meeting'
           : /\bConversation\b/.test(text) ? 'group' : 'space';
       const notifications = parseInt(text.match(/(\d+)\s+Notification/)?.[1] || '0', 10);
-      list.push({ id, name: e.name, kind, notifications });
+      list.push({ id, name: e.name, kind, notifications, preview: previews.get(id) || null });
     }
     const key = JSON.stringify(list);
     if (key !== lastConversations) {
@@ -504,6 +612,9 @@
   window.__gslack = {
     openSwitcher,
     openGroup,
+    markRead,
+    previews: () => [...previews].map(([id, p]) => ({ id, ...p })),
+    search,
     toggleTheme,
     entries,
     SEL,

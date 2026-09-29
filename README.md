@@ -8,10 +8,13 @@ Built with Electron, for **macOS, Windows and Linux**. Google apps run in their 
 
 - **Chat, Slack-style**: dark top bar and sidebar, compact messages, DMs without bubbles, quick switcher, keyboard navigation between conversations, native notifications, unread badge.
 - **Left rail**: Home, Chat, Mail, Calendar, Reviews, Jira, with unread badges.
-- **Home**: what needs you now (meetings about to start, unread DMs, failing CI, approved PRs, overdue tickets, reviews waiting for days), your day as a timeline with free slots, reviews to do, your pull requests, your Jira tickets, unread conversations and important mail.
+- **Home**: what needs you now (meetings about to start, unread DMs, failing CI, approved PRs, overdue tickets, reviews waiting for days), your day as a timeline with free slots, reviews to do, your pull requests, your Jira tickets, latest messages and important mail.
 - **Reviews**: pull requests waiting for your review (via the GitHub CLI), people before bots, stale ones folded away, per-repo hiding.
 - **Jira**: tickets assigned to you with status, sprint and due date, linked to your pull requests by issue key (`[PROJ-123]` in the PR title).
 - **Meetings**: next-meeting pill in Chat's top bar, a reminder notification before each meeting, a weekday morning summary.
+- **Work items**: one page per ticket (`PROJ-123`) with the Jira ticket, every pull request that mentions it (yours and your teammates', with CI and review state), subtasks and links, latest comments, an activity timeline, and the Chat messages, mail and meetings that name it. Open it from any ticket or key on Home, with ⌘J / Ctrl+J, or by clicking a Jira link in Chat or Gmail.
+- **Message chips**: while you're on another view, new Chat messages show as a small chip in the corner instead of a system notification.
+- **Messages on Home**: the latest Chat messages you were notified about, one row per conversation, then the other unread conversations. Click to open the conversation; ✕ or *Clear all* marks it read in Chat. The list lives in memory only (empty after a restart), and a conversation you read in Chat leaves it by itself.
 - **Act from Home**: approve, merge, re-run failed CI (with the failing lines shown), move Jira tickets, copy a ready-made standup, hand a PR or a ticket to your AI coding agent. See [Workflow](#workflow).
 
 ## Install
@@ -85,6 +88,7 @@ Everything below runs on your machine with your own logins; anything that change
 
 - **GitHub** (via `gh`): *Approve* on reviews, *Merge* on approved PRs (with the repository's default method), and on a failing PR *Why?* shows the failing check. For GitHub Actions it also shows the error lines and the log excerpt, plus *Re-run failed*; other checks (e.g. SonarQube) link to their page.
 - **Jira transitions**: when one of your open PRs references a ticket that isn't in a review status yet, or when its PR is merged and no open PR references it anymore, Home suggests the move (e.g. *→ CODE REVIEW*, *→ Done*). Targets come from your Jira workflow's own transitions, never hard-coded names. Keys are read from PR titles and branch names (`feat/proj-123-…`).
+- **Work items**: *Move to…* uses the ticket's own workflow transitions, *Copy branch* gives `feat/proj-123-short-summary`, and every PR row has the same actions as on Home (*Approve*, *Merge*, *Why?*, *⚡ Review*, *⚡ Fix CI*). Pull requests are found with GitHub search in the organisations you work in, then matched on the exact key in their title, branch or description. Chat mentions come from the messages Workrail was notified about since it started (kept in memory only, and only when they name a key); *Search in Chat* / *Search in Mail* run the full search.
 - **Standup**: a few minutes before the first meeting matching *Daily / stand-up / scrum* (configurable), a notification offers your standup: yesterday (merged, opened, reviewed, tickets moved), today, blockers. It is only copied, never posted. French or English (system language by default). Also available any time from the *Standup* button on Home.
 - **AI agent hand-off**: *⚡ Review* (reviews), *⚡ Fix CI* (failing PRs) and *⚡ Implement* (tickets) open a terminal in the right repository (found in your code folders by its GitHub remote, or cloned on demand), check out the PR branch and start your agent with a prepared prompt. The prompt is written to a file and passed as a single argument: it is never interpreted by a shell.
 
@@ -106,10 +110,12 @@ Everything below runs on your machine with your own logins; anything that change
 |---|---|---|
 | Home, Chat, Mail, Calendar, Reviews, Jira | ⌘1 … ⌘6 | Ctrl+1 … Ctrl+6 |
 | Quick switcher (Chat) | ⌘K | Ctrl+K |
+| Go to a work item (ticket key or search) | ⌘J | Ctrl+J |
 | Previous / next conversation (next unread with ⇧) | ⌥↑ / ⌥↓ | Alt+↑ / Alt+↓ |
 | Settings | ⌘, | Ctrl+, |
 | Back / forward | ⌘[ / ⌘] | Ctrl+[ / Ctrl+] |
 | Toggle the Slack theme in Chat | ⌘⇧, | Ctrl+Shift+, |
+| Reload / Developer tools | ⌘R / ⌥⌘I | Ctrl+R / Alt+Ctrl+I |
 | Quit | ⌘Q | Ctrl+Q |
 
 ## Troubleshooting
@@ -122,7 +128,9 @@ Everything below runs on your machine with your own logins; anything that change
 
 ## Privacy
 
-Everything stays on your machine. Workrail has no server and sends nothing anywhere: it talks directly to Google, GitHub (through `gh`) and your Jira site with your own sessions. Settings, sessions and caches live in the app's user-data folder:
+Everything stays on your machine. Workrail has no server and sends nothing anywhere: it talks directly to Google, GitHub (through `gh`) and your Jira site with your own sessions. The only other request is an anonymous check for a new Workrail release on GitHub, a few times a day (Settings → Home to turn it off); it sends nothing about you.
+
+New releases show as a small version pill at the bottom of the rail. Updating is a manual download: the installers are not signed, so Workrail cannot update itself. Settings, sessions and caches live in the app's user-data folder:
 
 - macOS: `~/Library/Application Support/Workrail`
 - Windows: `%APPDATA%\Workrail`
@@ -137,7 +145,7 @@ npm install
 npm start          # run the app
 npm run dev        # DevTools protocol on :9222 + live reload of the Chat theme
 npm run smoke      # start, check that the window and Home load, exit (used by CI)
-npm test           # unit tests (agent launcher safety, parsing), also run by CI
+npm test           # unit tests (agent launcher safety, work items, Jira parsing, version check), also run by CI
 npm run dist       # installer for the current system, in dist/
 npm run icons      # re-render the app icon PNGs from scripts/make-icons.cjs
 ```
@@ -149,9 +157,9 @@ npm run icons      # re-render the app icon PNGs from scripts/make-icons.cjs
 - `src/main.js`: window, rail, tray, services, menu, IPC. `src/platform.js`: per-OS differences.
 - `src/views.js`: the app views (web views and local panels) and link routing.
 - `src/inject/`: CSS and JS injected into Google Chat (theme, switcher, notifications, DOM tagging).
-- `src/services/`: Gmail (Atom feed), GitHub (`gh api graphql`), Calendar (iCal via `node-ical`), Jira (REST with the web session).
+- `src/services/`: Gmail (Atom feed), GitHub (`gh api graphql`), Calendar (iCal via `node-ical`), Jira (REST with the web session), work items (`workitem.js`, merges every source for one key), release check (`updates.js`).
 - `src/priorities.js`: the rules behind Home's *Focus* list.
-- `src/panels/`, `src/shell/`: local pages (Home, Reviews, Settings, rail).
+- `src/panels/`, `src/shell/`: local pages (Home, work item hub, Reviews, Settings, rail); `panels/ui.js` and `ui.css` hold the pieces Home and the hub share.
 
 Google Chat's markup is obfuscated and changes over time. All the selectors live in the `SEL` object at the top of `src/inject/app.js`, and the theme only targets Workrail's own `data-gslack*` attributes. To inspect the live page, run `npm run dev` and use `node scripts/dump-dom.mjs` (see the script header for options).
 
